@@ -1,0 +1,14 @@
+[
+    {
+        "customer": "Dinesh R",
+        "mobile": "8135467",
+        "source": "WhatsApp",
+        "activity": "New Enquiry"
+    },
+    {
+        "customer": "Navin Sahu",
+        "mobile": "6262000",
+        "source": "Facebook",
+        "activity": "Site Visit Done"
+    }
+]
