@@ -32,25 +32,48 @@ def register_user(data):
             data['emp_last_name'],
             data['role_id'],
             data['emp_status'],
-            data.get('created_by', 'admin'),
+            data.get('created_by', 'ADMIN'),
             datetime.now()
         )
 
         cursor.execute(query, values)
         conn.commit()
 
-    except mysql.connector.IntegrityError as e:
-        # Foreign key / duplicate key / constraint issues
-        raise Exception(
-            "Invalid role_id or employee already exists"
-        )
-
-    except Exception as e:
-        # Any other unexpected error
-        raise Exception(str(e))
+    except mysql.connector.IntegrityError:
+        raise Exception("Invalid role_id or employee already exists")
 
     finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
+
+
+# ✅ NEW FUNCTION
+def get_all_users():
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
+
+    query = """
+        SELECT
+            emp_id,
+            emp_first_name,
+            emp_middle_name,
+            emp_last_name,
+            role_id,
+            emp_status,
+            created_by,
+            created_on,
+            modified_by,
+            modified_on
+        FROM employee
+        ORDER BY created_on DESC
+    """
+
+    cursor.execute(query)
+    users = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    return users
