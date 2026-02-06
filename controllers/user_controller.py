@@ -1,5 +1,10 @@
 from flask import Blueprint, request, jsonify
-from services.user_service import register_user, get_all_users
+from services.user_service import (
+    register_user,
+    get_all_users,
+    get_user_by_id,
+    update_user
+)
 
 user_controller_bp = Blueprint(
     'user_controller_bp',
@@ -43,7 +48,7 @@ def create_user():
 
 
 # -------------------------
-# GET ALL USERS ✅
+# GET ALL USERS
 # -------------------------
 @user_controller_bp.route('/users', methods=['GET'])
 def fetch_users():
@@ -53,6 +58,60 @@ def fetch_users():
             "success": True,
             "data": users
         }), 200
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+# -------------------------
+# GET USER BY EMP ID ✅
+# -------------------------
+@user_controller_bp.route('/users/<emp_id>', methods=['GET'])
+def fetch_user_by_id_controller(emp_id):
+    try:
+        user = get_user_by_id(emp_id)
+
+        if not user:
+            return jsonify({
+                "success": False,
+                "error": "User not found"
+            }), 404
+
+        return jsonify({
+            "success": True,
+            "data": user
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+# -------------------------
+# UPDATE USER BY EMP ID ✅
+# -------------------------
+@user_controller_bp.route('/users/<emp_id>', methods=['PUT'])
+def update_user_controller(emp_id):
+    data = request.json
+
+    try:
+        updated = update_user(emp_id, data)
+
+        if not updated:
+            return jsonify({
+                "success": False,
+                "error": "User not found"
+            }), 404
+
+        return jsonify({
+            "success": True,
+            "message": "User updated successfully"
+        }), 200
+
     except Exception as e:
         return jsonify({
             "success": False,
