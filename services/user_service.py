@@ -156,3 +156,37 @@ def update_user(emp_id, data):
     conn.close()
 
     return updated
+
+
+# -------------------------
+# UPDATE USER STATUS ONLY ✅ (FOR TOGGLE)
+# -------------------------
+def update_user_status(emp_id, new_status):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    query = """
+        UPDATE employee
+        SET
+            emp_status = %s,
+            modified_by = %s,
+            modified_on = %s
+        WHERE emp_id = %s
+    """
+
+    values = (
+        new_status,
+        'ADMIN',  # or fetch logged-in user later
+        datetime.now(),
+        emp_id
+    )
+
+    cursor.execute(query, values)
+    conn.commit()
+
+    updated = cursor.rowcount > 0
+
+    cursor.close()
+    conn.close()
+
+    return updated

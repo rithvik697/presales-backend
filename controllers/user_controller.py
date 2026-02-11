@@ -1,14 +1,18 @@
+from db import get_db 
+
 from flask import Blueprint, request, jsonify
 from services.user_service import (
     register_user,
     get_all_users,
     get_user_by_id,
-    update_user
+    update_user,
+    update_user_status
 )
 
 user_controller_bp = Blueprint(
     'user_controller_bp',
-    __name__
+    __name__,
+    url_prefix='/api'   # ✅ IMPORTANT
 )
 
 # -------------------------
@@ -66,7 +70,7 @@ def fetch_users():
 
 
 # -------------------------
-# GET USER BY EMP ID ✅
+# GET USER BY EMP ID
 # -------------------------
 @user_controller_bp.route('/users/<emp_id>', methods=['GET'])
 def fetch_user_by_id_controller(emp_id):
@@ -92,7 +96,7 @@ def fetch_user_by_id_controller(emp_id):
 
 
 # -------------------------
-# UPDATE USER BY EMP ID ✅
+# UPDATE FULL USER
 # -------------------------
 @user_controller_bp.route('/users/<emp_id>', methods=['PUT'])
 def update_user_controller(emp_id):
@@ -110,6 +114,42 @@ def update_user_controller(emp_id):
         return jsonify({
             "success": True,
             "message": "User updated successfully"
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+# ===========================================
+# UPDATE ONLY USER STATUS (TOGGLE)
+# ===========================================
+@user_controller_bp.route('/users/<emp_id>/status', methods=['PUT'])
+def update_user_status_controller(emp_id):
+
+    data = request.json
+    new_status = data.get('emp_status')
+
+    if new_status not in ['Active', 'Inactive']:
+        return jsonify({
+            "success": False,
+            "error": "Invalid status"
+        }), 400
+
+    try:
+        updated = update_user_status(emp_id, new_status)
+
+        if not updated:
+            return jsonify({
+                "success": False,
+                "error": "User not found"
+            }), 404
+
+        return jsonify({
+            "success": True,
+            "message": "Status updated successfully"
         }), 200
 
     except Exception as e:
