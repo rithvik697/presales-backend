@@ -54,7 +54,7 @@ def get_all_leads(filters=None):
             c.profession as profession,
             ls.source_name as source,
             lst.status_name as status,
-            e.emp_first_name as assigned_to,
+            TRIM(CONCAT(e.emp_first_name, ' ', IFNULL(e.emp_last_name, ''))) as assigned_to,
             l.lead_description as description,
             l.created_on as createdAt,
             l.modified_on as modifiedAt,
