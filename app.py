@@ -20,21 +20,7 @@ app.register_blueprint(user_controller_bp, url_prefix="/api")
 app.register_blueprint(leads_bp, url_prefix='/api/leads')
 
 
-@app.route('/', methods=['GET'])
-def home():
-    return jsonify({"message": "Backend is running", "endpoints": ["/api/leads", "/health"]}), 200
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    try:
-        conn = get_db_connection()
-        if conn and conn.is_connected():
-            conn.close()
-            return jsonify({"status": "healthy", "database": "connected"}), 200
-        else:
-            return jsonify({"status": "unhealthy", "database": "disconnected"}), 500
-    except Exception as e:
-        return jsonify({"status": "unhealthy", "error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
