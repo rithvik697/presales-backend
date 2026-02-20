@@ -19,3 +19,6 @@ public.pem
 # OS
 .DS_Store
 Thumbs.db
+
+#db
+db.py
