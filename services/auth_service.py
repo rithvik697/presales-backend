@@ -18,6 +18,10 @@ class AuthService:
         db = get_db()
         cursor = db.cursor(dictionary=True)
 
+        # Strip and lowercase inputs for robust matching
+        username_clean = username.strip().lower()
+        email_clean = email.strip().lower()
+
         try:
             cursor.execute("""
                 SELECT
@@ -29,8 +33,8 @@ class AuthService:
                     role_id,
                     last_login
                 FROM employee
-                WHERE username = %s AND email = %s
-            """, (username.lower(), email.lower()))
+                WHERE username = %s OR email = %s
+            """, (username_clean, email_clean))
 
             user = cursor.fetchone()
 
@@ -38,8 +42,9 @@ class AuthService:
                 logger.warning(f"Login failed: user not found ({username}, {email})")
                 return None
 
-            if user["emp_status"].lower() != "active":
-                logger.warning(f"Inactive employee attempted login: {username}")
+            status = user.get("emp_status") or ""
+            if status.lower() != "active":
+                logger.warning(f"Inactive or invalid employee status attempted login: {username} (Status: {status})")
                 return None
 
             try:
@@ -63,6 +68,7 @@ class AuthService:
             return {
                 "user_id": user["user_id"],
                 "username": user["username"],
+                "email": user["email"],
                 "role_type": user["role_id"]
             }
 

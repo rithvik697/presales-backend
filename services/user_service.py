@@ -1,6 +1,7 @@
 from db import get_db
 from datetime import datetime
 import mysql.connector
+from services.auth_service import hash_password
 
 
 # -------------------------
@@ -17,6 +18,9 @@ def register_user(data):
         query = """
             INSERT INTO employee (
                 emp_id,
+                username,
+                email,
+                password_hash,
                 emp_first_name,
                 emp_middle_name,
                 emp_last_name,
@@ -25,14 +29,17 @@ def register_user(data):
                 created_by,
                 created_on
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
         values = (
-            data['emp_id'],
-            data['emp_first_name'],
-            data.get('emp_middle_name'),
-            data['emp_last_name'],
+            data['emp_id'].strip(),
+            data['username'].strip().lower(),
+            data['email'].strip().lower(),
+            hash_password(data['password']),
+            data['emp_first_name'].strip(),
+            data.get('emp_middle_name', '').strip(),
+            data['emp_last_name'].strip(),
             data['role_id'],
             data['emp_status'],
             data.get('created_by', 'ADMIN'),
@@ -123,31 +130,40 @@ def update_user(emp_id, data):
     conn = get_db()
     cursor = conn.cursor()
 
-    query = """
+    password_clause = ""
+    values_list = [
+        data['emp_first_name'],
+        data.get('emp_middle_name'),
+        data['emp_last_name'],
+        data['role_id'],
+        data['emp_status']
+    ]
+    
+    if data.get('password'):
+        password_clause = ", password_hash = %s"
+        values_list.append(hash_password(data['password']))
+    
+    values_list.extend([
+        data.get('modified_by', 'ADMIN'),
+        datetime.now(),
+        emp_id
+    ])
+
+    query = f"""
         UPDATE employee
         SET
             emp_first_name = %s,
             emp_middle_name = %s,
             emp_last_name = %s,
             role_id = %s,
-            emp_status = %s,
+            emp_status = %s
+            {password_clause},
             modified_by = %s,
             modified_on = %s
         WHERE emp_id = %s
     """
 
-    values = (
-        data['emp_first_name'],
-        data.get('emp_middle_name'),
-        data['emp_last_name'],
-        data['role_id'],
-        data['emp_status'],
-        data.get('modified_by', 'ADMIN'),
-        datetime.now(),
-        emp_id
-    )
-
-    cursor.execute(query, values)
+    cursor.execute(query, tuple(values_list))
     conn.commit()
 
     updated = cursor.rowcount > 0

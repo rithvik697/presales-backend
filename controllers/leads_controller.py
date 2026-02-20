@@ -38,8 +38,6 @@ def to_frontend_format(backend_lead):
         'status': backend_lead.get('status'),
         'assignedTo': backend_lead.get('assigned_to'), 
         'description': description,
-        'assignedTo': backend_lead.get('assigned_to'), 
-        'description': description,
         'createdAt': backend_lead.get('createdAt'),
         'createdBy': backend_lead.get('created_by'),
         'modifiedAt': backend_lead.get('modifiedAt'),
@@ -137,5 +135,16 @@ def update_lead(lead_id):
             return jsonify({'message': 'Lead updated successfully'}), 200
         else:
             return jsonify({'error': 'Failed to update lead'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@leads_bp.route('/<string:lead_id>', methods=['DELETE'])
+def delete_lead_api(lead_id):
+    try:
+        success = leads_service.delete_existing_lead(lead_id)
+        if success:
+            return jsonify({'message': 'Lead deleted successfully'}), 200
+        else:
+            return jsonify({'error': 'Failed to delete lead'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500

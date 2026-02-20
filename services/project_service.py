@@ -116,12 +116,18 @@ class ProjectService:
         db = get_db()
         cursor = db.cursor()
         try:
+            allowed_fields = [
+                "project_name", "project_type", "location", "address_line_1",
+                "city", "state", "pincode", "total_area", "number_of_units",
+                "rera_number", "status", "modified_by"
+            ]
             fields = []
             values = []
 
-            for key, value in data.items():
-                fields.append(f"{key} = %s")
-                values.append(value)
+            for key in allowed_fields:
+                if key in data:
+                    fields.append(f"{key} = %s")
+                    values.append(data[key])
 
             if not fields:
                 return {"message": "Nothing to update"}

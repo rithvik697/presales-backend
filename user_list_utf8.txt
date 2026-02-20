@@ -1,0 +1,4 @@
+﻿Total users: 3
+ID: EMP001, User: test.emp, Email: test.emp@company.com, Status: None
+ID: EMP002, User: rithvik, Email: rithvik@company.com, Status: Active
+ID: EMP003, User: aryan, Email: aryanfall2022@gmail.com, Status: Active

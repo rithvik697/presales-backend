@@ -1,5 +1,6 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
+from db import get_db_connection
 
 # Import Blueprints
 from controllers.project_controller import project_bp

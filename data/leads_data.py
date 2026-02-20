@@ -50,6 +50,7 @@ def get_all_leads(filters=None):
             l.lead_id as id,
             CONCAT(c.customer_first_name, ' ', IFNULL(c.customer_last_name, '')) as name,
             c.phone_num as phone,
+            c.alt_num as alternatePhone,
             c.email as email,
             c.profession as profession,
             ls.source_name as source,
@@ -173,7 +174,7 @@ def update_lead(lead_id, data):
                 first = full_name[0]
                 last = " ".join(full_name[1:]) if len(full_name) > 1 else ""
                 
-                cust_query = "UPDATE customer SET customer_first_name = %s, customer_last_name = %s, email = %s, alternate_phone = %s, profession = %s WHERE customer_id = %s"
+                cust_query = "UPDATE customer SET customer_first_name = %s, customer_last_name = %s, email = %s, alt_num = %s, profession = %s WHERE customer_id = %s"
                 cursor.execute(cust_query, (first, last, data.get('email'), data.get('alternate_phone'), data.get('profession'), cust_id))
 
 
@@ -202,7 +203,7 @@ def get_lead_by_id(lead_id):
             c.customer_first_name,
             c.customer_last_name,
             c.phone_num as phone,
-            c.alternate_phone as alternatePhone,
+            c.alt_num as alternatePhone,
             c.email,
             c.profession, 
             ls.source_name as source,
@@ -252,11 +253,13 @@ def _get_or_create_customer(cursor, data):
     if not phone:
         return None
         
-    # Check existence
-    cursor.execute("SELECT customer_id FROM customer WHERE phone_num = %s", (phone,))
+    # Check existence - be flexible with spaces/prefixes
+    # Normalize phone: remove spaces, dashes, and plus signs
+    clean_phone = phone.replace(' ', '').replace('-', '').replace('+', '')
+    cursor.execute("SELECT customer_id FROM customer WHERE phone_num = %s OR REPLACE(REPLACE(REPLACE(phone_num, ' ', ''), '-', ''), '+', '') = %s", (phone, clean_phone))
     res = cursor.fetchone()
     if res:
-        return res[0] # Return existing ID (tuple access since default cursor)
+        return res[0]
 
     # Create new
     customer_id = _generate_id(cursor, 'customer', 'customer_id', 'CUST')
@@ -266,7 +269,7 @@ def _get_or_create_customer(cursor, data):
     last_name = " ".join(full_name[1:]) if len(full_name) > 1 else ""
 
     query = """
-    INSERT INTO customer (customer_id, customer_first_name, customer_last_name, phone_num, alternate_phone, email, profession, created_on, is_active)
+    INSERT INTO customer (customer_id, customer_first_name, customer_last_name, phone_num, alt_num, email, profession, created_on, is_active)
     VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), 1)
     """
     cursor.execute(query, (customer_id, first_name, last_name, phone, data.get('alternate_phone'), data.get('email'), data.get('profession')))
@@ -321,10 +324,10 @@ def create_lead(data):
 
         # 2. Resolve Foreign Keys
         # Use simple lookups or defaults from seeds
-        source_id = _get_id_by_name(cursor, 'lead_sources', 'source_name', 'source_id', data.get('source')) or 'SRC001' # Default Website
-        status_id = _get_id_by_name(cursor, 'lead_status', 'status_name', 'status_id', data.get('status')) or 'STAT001' # Default New
+        source_id = _get_id_by_name(cursor, 'lead_sources', 'source_name', 'source_id', data.get('source')) or 'S001' # Default Website
+        status_id = _get_id_by_name(cursor, 'lead_status', 'status_name', 'status_id', data.get('status')) or 'ST001' # Default New
         emp_id = _get_employee_id_by_name(cursor, data.get('assigned_to')) or 'EMP001' # Default Admin
-
+        
         # 3. Handle Project (Append to Description)
         description = data.get('description', '')
         project = data.get('project')
@@ -337,10 +340,12 @@ def create_lead(data):
         # 4. Create Lead
         new_lead_id = _generate_id(cursor, 'leads', 'lead_id', 'L') # Generating L001, L002...
         query = """
-        INSERT INTO leads (lead_id, customer_id, source_id, status_id, emp_id, lead_description, created_on, is_active)
-        VALUES (%s, %s, %s, %s, %s, %s, NOW(), 1)
+        INSERT INTO leads (lead_id, customer_id, source_id, status_id, emp_id, lead_description, created_on, created_by, modified_on, modified_by, is_active)
+        VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s, NOW(), %s, 1)
         """
-        cursor.execute(query, (new_lead_id, customer_id, source_id, status_id, emp_id, description))
+        # Using a default creator/modifier ID (e.g., 'EMP001' for Admin)
+        admin_id = 'EMP001'
+        cursor.execute(query, (new_lead_id, customer_id, source_id, status_id, emp_id, description, admin_id, admin_id))
         
         conn.commit()
     except Exception as e:
@@ -355,8 +360,20 @@ def create_lead(data):
 
 
 def delete_lead(lead_id):
-    # Not fully implemented for strict schema refactor yet - Placeholder
-    return False
+    """Deactivates a lead (Soft delete)."""
+    conn = get_db_connection()
+    if not conn: return False
+    try:
+        cursor = conn.cursor()
+        query = "UPDATE leads SET is_active = 0 WHERE lead_id = %s"
+        cursor.execute(query, (lead_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        print(f"Delete Error: {e}")
+        return False
+    finally:
+        conn.close()
 
 def get_all_employees():
     """Fetches all employees from the database."""

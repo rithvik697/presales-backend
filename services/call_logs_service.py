@@ -102,9 +102,9 @@ def get_call_logs_for_ui():
     try:
         cursor.execute("""
             SELECT
-                e.name AS userName,
-                l.name AS leadName,
-                l.phone AS phoneNumber,
+                CONCAT(e.emp_first_name, ' ', IFNULL(e.emp_last_name, '')) AS userName,
+                CONCAT(cust.customer_first_name, ' ', IFNULL(cust.customer_last_name, '')) AS leadName,
+                cust.phone_num AS phoneNumber,
                 c.call_source AS callType,
                 c.call_status AS callStatus,
                 CASE
@@ -115,10 +115,11 @@ def get_call_logs_for_ui():
                     )
                 END AS callDuration,
                 c.call_time AS callTime,
-                l.remarks AS remarks
+                l.lead_description AS remarks
             FROM call_log c
             JOIN employee e ON c.emp_id = e.emp_id
             JOIN leads l ON c.lead_id = l.lead_id
+            LEFT JOIN customer cust ON l.customer_id = cust.customer_id
             ORDER BY c.call_time DESC
         """)
         return cursor.fetchall()

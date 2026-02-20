@@ -1,0 +1,3 @@
+﻿USER_DETAILS: {'emp_id': 'EMP001', 'username': 'test.emp', 'email': 'test.emp@company.com', 'emp_status': None}
+USER_DETAILS: {'emp_id': 'EMP002', 'username': 'rithvik', 'email': 'rithvik@company.com', 'emp_status': 'Active'}
+USER_DETAILS: {'emp_id': 'EMP003', 'username': 'aryan', 'email': 'aryanfall2022@gmail.com', 'emp_status': 'Active'}

@@ -8,7 +8,7 @@ from mysql.connector import pooling
 DB_CONFIG = {
     "host": "localhost",
     "user": "root",
-    "password": "Kana@123",
+    "password": "2004",
     "database": "presales_crm"
 }
 

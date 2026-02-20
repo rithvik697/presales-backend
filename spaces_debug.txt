@@ -1,0 +1,3 @@
+﻿ID: EMP001, U: 'test.emp', E: 'test.emp@company.com'
+ID: EMP002, U: 'rithvik', E: 'rithvik@company.com'
+ID: EMP003, U: 'aryan', E: 'aryanfall2022@gmail.com'

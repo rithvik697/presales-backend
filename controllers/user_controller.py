@@ -20,6 +20,9 @@ def create_user():
 
     required_fields = [
         'emp_id',
+        'username',
+        'email',
+        'password',
         'emp_first_name',
         'emp_last_name',
         'role_id',
