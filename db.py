@@ -8,7 +8,7 @@ DB_CONFIG = {
     "host": "localhost",
     "user": "root",
     "password": "Kana@123",
-    "database": "presales_crm"
+    "database": "presales"
 }
 # ----------------------------------------
 # Connection pool

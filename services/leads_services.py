@@ -51,7 +51,6 @@ def get_all_leads(filters=None):
             CONCAT(c.customer_first_name, ' ', IFNULL(c.customer_last_name, '')) as name,
             c.phone_num as phone,
             c.email as email,
-            c.profession as profession,
             ls.source_name as source,
             lst.status_name as status,
             TRIM(CONCAT(e.emp_first_name, ' ', IFNULL(e.emp_last_name, ''))) as assigned_to,
@@ -113,8 +112,6 @@ def get_all_leads(filters=None):
         conn.close()
     return leads
     
-# ... (get_lead_by_id stays similar, needs update too, but skipping for brevity if not strictly asked, though safer to update)
-
 def update_lead(lead_id, data):
     """
     Updates a lead.
@@ -159,8 +156,6 @@ def update_lead(lead_id, data):
         current_time = datetime.utcnow()
         cursor.execute(query, (source_id, status_id, emp_id, description, current_time, modifier_id, lead_id))
 
-
-        
         # 4. Update Customer Name/Email if provided (Optional, but "editing should be possible")
         # We need to find the customer_id first to be safe
         cursor.execute("SELECT customer_id FROM leads WHERE lead_id = %s", (lead_id,))
@@ -173,11 +168,14 @@ def update_lead(lead_id, data):
                 first = full_name[0]
                 last = " ".join(full_name[1:]) if len(full_name) > 1 else ""
                 
-                cust_query = "UPDATE customer SET customer_first_name = %s, customer_last_name = %s, email = %s, alternate_phone = %s, profession = %s WHERE customer_id = %s"
-                cursor.execute(cust_query, (first, last, data.get('email'), data.get('alternate_phone'), data.get('profession'), cust_id))
-
-
-
+                alt_phone_update = data.get('alternate_phone')
+                if alt_phone_update:
+                    alt_phone_update = re.sub(r'\D', '', str(alt_phone_update))
+                if not alt_phone_update:
+                    alt_phone_update = None
+                    
+                cust_query = "UPDATE customer SET customer_first_name = %s, customer_last_name = %s, email = %s, alt_num = %s WHERE customer_id = %s"
+                cursor.execute(cust_query, (first, last, data.get('email'), alt_phone_update, cust_id))
         
         conn.commit()
         return True
@@ -202,9 +200,8 @@ def get_lead_by_id(lead_id):
             c.customer_first_name,
             c.customer_last_name,
             c.phone_num as phone,
-            c.alternate_phone as alternatePhone,
+            c.alt_num as alternatePhone,
             c.email,
-            c.profession, 
             ls.source_name as source,
             lst.status_name as status,
             e.emp_first_name as assigned_to,
@@ -246,11 +243,16 @@ def get_lead_by_id(lead_id):
         conn.close()
     return lead
 
+import re
+
 def _get_or_create_customer(cursor, data):
     """Helper to find or create a customer by phone number."""
     phone = data.get('phone')
     if not phone:
         return None
+        
+    # Sanitize phone to digits only (for BIGINT schema)
+    phone = re.sub(r'\D', '', str(phone))
         
     # Check existence
     cursor.execute("SELECT customer_id FROM customer WHERE phone_num = %s", (phone,))
@@ -265,15 +267,18 @@ def _get_or_create_customer(cursor, data):
     first_name = full_name[0]
     last_name = " ".join(full_name[1:]) if len(full_name) > 1 else ""
 
+    alt_phone = data.get('alternate_phone')
+    if alt_phone:
+        alt_phone = re.sub(r'\D', '', str(alt_phone))
+    if not alt_phone:
+        alt_phone = None
+
     query = """
-    INSERT INTO customer (customer_id, customer_first_name, customer_last_name, phone_num, alternate_phone, email, profession, created_on, is_active)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), 1)
+    INSERT INTO customer (customer_id, customer_first_name, customer_last_name, phone_num, alt_num, email, created_on, is_active)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, 1)
     """
-    cursor.execute(query, (customer_id, first_name, last_name, phone, data.get('alternate_phone'), data.get('email'), data.get('profession')))
+    cursor.execute(query, (customer_id, first_name, last_name, phone, alt_phone, data.get('email'), datetime.utcnow()))
     return customer_id
-
-
-
 
 def _get_id_by_name(cursor, table, name_col, id_col, name_val):
     """Helper to lookup ID by Name. Returns None if not found."""
@@ -307,6 +312,9 @@ def create_lead(data):
     2. Lookup Source, Status, Employee IDs.
     3. Insert Lead.
     """
+    if not data.get('name') or not data.get('phone'):
+        raise ValueError("Name and Phone are required fields.")
+
     conn = get_db_connection()
     if not conn: raise Exception("DB Connection failed")
 
@@ -338,9 +346,9 @@ def create_lead(data):
         new_lead_id = _generate_id(cursor, 'leads', 'lead_id', 'L') # Generating L001, L002...
         query = """
         INSERT INTO leads (lead_id, customer_id, source_id, status_id, emp_id, lead_description, created_on, is_active)
-        VALUES (%s, %s, %s, %s, %s, %s, NOW(), 1)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, 1)
         """
-        cursor.execute(query, (new_lead_id, customer_id, source_id, status_id, emp_id, description))
+        cursor.execute(query, (new_lead_id, customer_id, source_id, status_id, emp_id, description, datetime.utcnow()))
         
         conn.commit()
     except Exception as e:
@@ -352,11 +360,28 @@ def create_lead(data):
     
     return new_lead_id
 
-
-
 def delete_lead(lead_id):
-    # Not fully implemented for strict schema refactor yet - Placeholder
-    return False
+    """Deletes a lead and its dependent records (call logs, campaigns)."""
+    conn = get_db_connection()
+    if not conn: return False
+    try:
+        cursor = conn.cursor()
+        
+        # Delete dependent records first to avoid foreign key constraints
+        cursor.execute("DELETE FROM call_log WHERE lead_id = %s", (lead_id,))
+        cursor.execute("DELETE FROM campaign WHERE lead_id = %s", (lead_id,))
+        
+        # Delete the lead
+        cursor.execute("DELETE FROM leads WHERE lead_id = %s", (lead_id,))
+        
+        conn.commit()
+        return True
+    except mysql.connector.Error as e:
+        conn.rollback()
+        print(f"Error deleting lead {lead_id}: {e}")
+        return False
+    finally:
+        conn.close()
 
 def get_all_employees():
     """Fetches all employees from the database."""
@@ -379,3 +404,45 @@ def get_all_employees():
     finally:
         conn.close()
     return employees
+
+def get_all_sources():
+    """Fetches all lead sources from the database."""
+    conn = get_db_connection()
+    if not conn: return []
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT source_name FROM lead_sources WHERE is_active = 1 ORDER BY source_name")
+        return [row['source_name'] for row in cursor.fetchall()]
+    except mysql.connector.Error as e:
+        print(f"Error fetching sources: {e}")
+        return []
+    finally:
+        conn.close()
+
+def get_all_statuses():
+    """Fetches all lead statuses from the database."""
+    conn = get_db_connection()
+    if not conn: return []
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT status_name FROM lead_status WHERE is_active = 1 ORDER BY status_name")
+        return [row['status_name'] for row in cursor.fetchall()]
+    except mysql.connector.Error as e:
+        print(f"Error fetching statuses: {e}")
+        return []
+    finally:
+        conn.close()
+
+def get_all_projects():
+    """Fetches all active projects from the database."""
+    conn = get_db_connection()
+    if not conn: return []
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT project_name FROM project_registration WHERE status = 'Active' ORDER BY project_name")
+        return [row['project_name'] for row in cursor.fetchall()]
+    except mysql.connector.Error as e:
+        print(f"Error fetching projects: {e}")
+        return []
+    finally:
+        conn.close()

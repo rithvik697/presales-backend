@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from services import leads_service
+from services import leads_services
 
 leads_bp = Blueprint('leads', __name__)
 
@@ -58,7 +58,7 @@ def get_leads():
             'project': request.args.get('project')
         }
         
-        leads = leads_service.fetch_all_leads(filters)
+        leads = leads_services.get_all_leads(filters)
         return jsonify([to_frontend_format(lead) for lead in leads]), 200
     except Exception as e:
         print(f"API Error: {e}")
@@ -67,7 +67,7 @@ def get_leads():
 @leads_bp.route('/<string:lead_id>', methods=['GET'])
 def get_lead(lead_id):
     try:
-        lead = leads_service.fetch_lead_by_id(lead_id)
+        lead = leads_services.get_lead_by_id(lead_id)
         if lead:
             return jsonify(to_frontend_format(lead)), 200
         return jsonify({'message': 'Lead not found'}), 404
@@ -95,7 +95,7 @@ def create_lead():
 
         }
         
-        new_id = leads_service.add_new_lead(data)
+        new_id = leads_services.create_lead(data)
         return jsonify({'id': new_id, 'message': 'Lead created successfully'}), 201
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -106,8 +106,32 @@ def create_lead():
 @leads_bp.route('/employees', methods=['GET'])
 def get_employees():
     try:
-        employees = leads_service.fetch_all_employees()
+        employees = leads_services.get_all_employees()
         return jsonify(employees), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@leads_bp.route('/sources', methods=['GET'])
+def get_sources():
+    try:
+        sources = leads_services.get_all_sources()
+        return jsonify(sources), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@leads_bp.route('/statuses', methods=['GET'])
+def get_statuses():
+    try:
+        statuses = leads_services.get_all_statuses()
+        return jsonify(statuses), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@leads_bp.route('/projects', methods=['GET'])
+def get_projects():
+    try:
+        projects = leads_services.get_all_projects()
+        return jsonify(projects), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -132,10 +156,21 @@ def update_lead(lead_id):
 
         }
         
-        success = leads_service.update_existing_lead(lead_id, update_data)
+        success = leads_services.update_lead(lead_id, update_data)
         if success:
             return jsonify({'message': 'Lead updated successfully'}), 200
         else:
             return jsonify({'error': 'Failed to update lead'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@leads_bp.route('/<string:lead_id>', methods=['DELETE'])
+def delete_lead(lead_id):
+    try:
+        success = leads_services.delete_lead(lead_id)
+        if success:
+            return jsonify({'message': 'Lead deleted successfully'}), 200
+        else:
+            return jsonify({'error': 'Failed to delete lead'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
