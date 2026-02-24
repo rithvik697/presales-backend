@@ -1,4 +1,4 @@
-from db import get_db_connection
+from db import get_db
 import mysql.connector
 from datetime import datetime
 
@@ -45,7 +45,15 @@ def _get_employee_id_by_name(cursor, full_name):
     res = cursor.fetchone()
     return res[0] if res else None
 
-def _get_or_create_customer(cursor, data):
+def _get_employee_name_by_id(cursor, emp_id):
+    """Helper to find employee full name by ID."""
+    if not emp_id: return None
+    query = "SELECT TRIM(CONCAT(emp_first_name, ' ', IFNULL(emp_last_name, ''))) FROM employee WHERE emp_id = %s"
+    cursor.execute(query, (emp_id,))
+    res = cursor.fetchone()
+    return res[0] if res else None
+
+def _get_or_create_customer(cursor, data, actor_name=None):
     """Helper to find or create a customer by phone number."""
     phone = data.get('phone')
     if not phone: return None
@@ -61,10 +69,10 @@ def _get_or_create_customer(cursor, data):
     last_name = " ".join(full_name[1:]) if len(full_name) > 1 else ""
 
     query = """
-    INSERT INTO customer (customer_id, customer_first_name, customer_last_name, phone_num, alt_num, email, profession, created_on, is_active)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), 1)
+    INSERT INTO customer (customer_id, customer_first_name, customer_last_name, phone_num, alt_num, email, profession, created_on, created_by, modified_on, modified_by, is_active)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s, NULL, NULL, 1)
     """
-    cursor.execute(query, (customer_id, first_name, last_name, phone, data.get('alternate_phone'), data.get('email'), data.get('profession')))
+    cursor.execute(query, (customer_id, first_name, last_name, phone, data.get('alternate_phone'), data.get('email'), data.get('profession'), actor_name))
     return customer_id
 
 # ---------------------------------------------------------
@@ -73,7 +81,7 @@ def _get_or_create_customer(cursor, data):
 
 def fetch_all_leads(filters=None):
     """Fetches leads with JOINs on customer, employee, source, status."""
-    conn = get_db_connection()
+    conn = get_db()
     leads = []
     if not conn: return []
 
@@ -82,21 +90,21 @@ def fetch_all_leads(filters=None):
         query = """
         SELECT 
             l.lead_id as id,
-            CONCAT(c.customer_first_name, ' ', IFNULL(c.customer_last_name, '')) as name,
+            TRIM(CONCAT(c.customer_first_name, ' ', IFNULL(c.customer_last_name, ''))) as name,
             c.phone_num as phone,
             c.alt_num as alternatePhone,
             c.email as email,
             c.profession as profession,
             ls.source_name as source,
             lst.status_name as status,
-            e.emp_first_name as assigned_to,
+            TRIM(CONCAT(e.emp_first_name, ' ', IFNULL(e.emp_last_name, ''))) as assignedTo,
+            pr.project_name as project,
+            l.project_id as projectId,
             l.lead_description as description,
             l.created_on as createdAt,
             l.modified_on as modifiedAt,
-            l.created_by as createdById,
-            l.modified_by as modifiedById,
-            ec.emp_first_name as createdByName,
-            em.emp_first_name as modifiedByName
+            ec.emp_first_name as createdBy,
+            em.emp_first_name as modifiedBy
         FROM leads l
         LEFT JOIN customer c ON l.customer_id = c.customer_id
         LEFT JOIN lead_sources ls ON l.source_id = ls.source_id
@@ -104,6 +112,7 @@ def fetch_all_leads(filters=None):
         LEFT JOIN employee e ON l.emp_id = e.emp_id
         LEFT JOIN employee ec ON l.created_by = ec.emp_id
         LEFT JOIN employee em ON l.modified_by = em.emp_id
+        LEFT JOIN project_registration pr ON l.project_id = pr.project_id
         WHERE l.is_active = 1
         """
         
@@ -123,16 +132,14 @@ def fetch_all_leads(filters=None):
                 query += " AND e.emp_first_name = %s"
                 params.append(filters['employee'])
             if filters.get('project'):
-                query += " AND l.lead_description LIKE %s"
-                params.append(f"Project: {filters['project']}%")
+                query += " AND pr.project_name = %s"
+                params.append(filters['project'])
         
         query += " ORDER BY l.created_on DESC"
         cursor.execute(query, tuple(params))
         result = cursor.fetchall()
         
         for row in result:
-             row['created_by'] = row['createdByName'] or row['createdById']
-             row['modified_by'] = row['modifiedByName'] or row['modifiedById']
              leads.append(row)
         
     except Exception as e:
@@ -143,7 +150,7 @@ def fetch_all_leads(filters=None):
 
 def fetch_lead_by_id(lead_id):
     """Fetches a single lead by ID."""
-    conn = get_db_connection()
+    conn = get_db()
     if not conn: return None
 
     try:
@@ -159,14 +166,14 @@ def fetch_lead_by_id(lead_id):
             c.profession, 
             ls.source_name as source,
             lst.status_name as status,
-            e.emp_first_name as assigned_to,
+            TRIM(CONCAT(e.emp_first_name, ' ', IFNULL(e.emp_last_name, ''))) as assignedTo,
+            pr.project_name as project,
+            l.project_id as projectId,
             l.lead_description as description,
             l.created_on as createdAt,
             l.modified_on as modifiedAt,
-            ec.emp_first_name as createdByName,
-            ec.emp_id as createdById,
-            em.emp_first_name as modifiedByName,
-            em.emp_id as modifiedById
+            ec.emp_first_name as createdBy,
+            em.emp_first_name as modifiedBy
         FROM leads l
         LEFT JOIN customer c ON l.customer_id = c.customer_id
         LEFT JOIN lead_sources ls ON l.source_id = ls.source_id
@@ -174,6 +181,7 @@ def fetch_lead_by_id(lead_id):
         LEFT JOIN employee e ON l.emp_id = e.emp_id
         LEFT JOIN employee ec ON l.created_by = ec.emp_id
         LEFT JOIN employee em ON l.modified_by = em.emp_id
+        LEFT JOIN project_registration pr ON l.project_id = pr.project_id
         WHERE l.lead_id = %s AND l.is_active = 1
         """
         cursor.execute(query, (lead_id,))
@@ -183,8 +191,6 @@ def fetch_lead_by_id(lead_id):
             result['name'] = f"{result['customer_first_name']} {result['customer_last_name'] or ''}".strip()
             del result['customer_first_name']
             del result['customer_last_name']
-            result['created_by'] = result['createdByName'] or result['createdById']
-            result['modified_by'] = result['modifiedByName'] or result['modifiedById']
             return result
     except Exception as e:
         print(f"Error fetching lead {lead_id}: {e}")
@@ -192,93 +198,143 @@ def fetch_lead_by_id(lead_id):
         conn.close()
     return None
 
-def add_new_lead(data):
-    """Adds a new lead and returns its generated ID."""
+def add_new_lead(data, actor_name=None):
     if not data.get('name') or not data.get('phone'):
         raise ValueError("Name and Phone are required fields.")
 
-    conn = get_db_connection()
-    if not conn: raise Exception("DB Connection failed")
+    conn = get_db()
+    if not conn:
+        raise Exception("DB Connection failed")
 
     try:
         cursor = conn.cursor()
-        customer_id = _get_or_create_customer(cursor, data)
-        if not customer_id: raise ValueError("Invalid Customer Data")
+
+        customer_id = _get_or_create_customer(cursor, data, actor_name)
 
         source_id = _get_id_by_name(cursor, 'lead_sources', 'source_name', 'source_id', data.get('source')) or 'S001'
         status_id = _get_id_by_name(cursor, 'lead_status', 'status_name', 'status_id', data.get('status')) or 'ST001'
         emp_id = _get_employee_id_by_name(cursor, data.get('assigned_to')) or 'EMP001'
-        
+
+        project_id = data.get('project')  # 🔥 directly store project_id
         description = data.get('description', '')
-        project = data.get('project')
-        if project:
-            description = f"Project: {project} | {description}" if description else f"Project: {project}"
 
         new_lead_id = _generate_id(cursor, 'leads', 'lead_id', 'L')
+
         query = """
-        INSERT INTO leads (lead_id, customer_id, source_id, status_id, emp_id, lead_description, created_on, created_by, modified_on, modified_by, is_active)
-        VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s, NOW(), %s, 1)
+        INSERT INTO leads
+        (lead_id, customer_id, source_id, status_id, emp_id,
+         project_id, lead_description,
+         created_on, created_by, modified_on, modified_by, is_active)
+        VALUES (%s, %s, %s, %s, %s,
+                %s, %s,
+                NOW(), %s, NULL, NULL, 1)
         """
-        admin_id = 'EMP001'
-        cursor.execute(query, (new_lead_id, customer_id, source_id, status_id, emp_id, description, admin_id, admin_id))
+
+        cursor.execute(query, (
+            new_lead_id,
+            customer_id,
+            source_id,
+            status_id,
+            emp_id,
+            project_id,   # 🔥 stored here
+            description,
+            actor_name
+        ))
+
         conn.commit()
         return new_lead_id
+
     except Exception as e:
         conn.rollback()
         raise e
     finally:
         conn.close()
 
-def update_existing_lead(lead_id, data):
+
+def update_existing_lead(lead_id, data, actor_name=None):
     """Updates an existing lead."""
-    conn = get_db_connection()
-    if not conn: return False
-    
+    conn = get_db()
+    if not conn:
+        return False
+
     try:
         cursor = conn.cursor()
+
         source_id = _get_id_by_name(cursor, 'lead_sources', 'source_name', 'source_id', data.get('source'))
         status_id = _get_id_by_name(cursor, 'lead_status', 'status_name', 'status_id', data.get('status'))
         emp_id = _get_employee_id_by_name(cursor, data.get('assigned_to'))
-        
+        project_id = data.get('project')  # 🔥 Now directly update project_id
+
         description = data.get('description', '')
-        project = data.get('project')
-        if project:
-            description = f"Project: {project} | {description}" if description else f"Project: {project}"
-                
+
         query = """
         UPDATE leads 
         SET source_id = IFNULL(%s, source_id),
             status_id = IFNULL(%s, status_id),
             emp_id = IFNULL(%s, emp_id),
+            project_id = IFNULL(%s, project_id),
             lead_description = %s,
-            modified_on = %s,
+            modified_on = NOW(),
             modified_by = %s
         WHERE lead_id = %s
         """
-        modifier_id = 'EMP001' 
-        cursor.execute(query, (source_id, status_id, emp_id, description, datetime.utcnow(), modifier_id, lead_id))
 
+        cursor.execute(query, (
+            source_id,
+            status_id,
+            emp_id,
+            project_id,  # 🔥 Proper column update
+            description,
+            actor_name,
+            lead_id
+        ))
+
+        # Update customer details if needed
         cursor.execute("SELECT customer_id FROM leads WHERE lead_id = %s", (lead_id,))
         res = cursor.fetchone()
+
         if res and (data.get('name') or data.get('email')):
             cust_id = res[0]
             names = data.get('name', '').split(' ')
             first = names[0]
             last = " ".join(names[1:]) if len(names) > 1 else ""
-            cust_query = "UPDATE customer SET customer_first_name = %s, customer_last_name = %s, email = %s, alt_num = %s, profession = %s WHERE customer_id = %s"
-            cursor.execute(cust_query, (first, last, data.get('email'), data.get('alternate_phone'), data.get('profession'), cust_id))
+
+            cust_query = """
+            UPDATE customer 
+            SET customer_first_name = %s,
+                customer_last_name = %s,
+                email = %s,
+                alt_num = %s,
+                profession = %s,
+                modified_on = NOW(),
+                modified_by = %s
+            WHERE customer_id = %s
+            """
+
+            cursor.execute(cust_query, (
+                first,
+                last,
+                data.get('email'),
+                data.get('alternate_phone'),
+                data.get('profession'),
+                actor_name,
+                cust_id
+            ))
 
         conn.commit()
         return True
+
     except Exception as e:
         conn.rollback()
+        print("Error updating lead:", e)
         return False
+
     finally:
         conn.close()
 
 def delete_existing_lead(lead_id):
     """Deactivates a lead (Soft delete)."""
-    conn = get_db_connection()
+    conn = get_db()
     if not conn: return False
     try:
         cursor = conn.cursor()
@@ -292,16 +348,80 @@ def delete_existing_lead(lead_id):
         conn.close()
 
 def fetch_all_employees():
-    """Fetches all employee names."""
-    conn = get_db_connection()
-    if not conn: return []
+    """Fetches all employees with ID and full name."""
+    conn = get_db()
+    if not conn:
+        return []
+
     try:
         cursor = conn.cursor(dictionary=True)
-        query = "SELECT emp_first_name, emp_last_name FROM employee ORDER BY emp_first_name"
+
+        query = """
+        SELECT 
+            emp_id,
+            TRIM(CONCAT(emp_first_name, ' ', IFNULL(emp_last_name, ''))) AS full_name
+        FROM employee
+        WHERE emp_status = 'Active'
+        ORDER BY emp_first_name
+        """
+
         cursor.execute(query)
-        result = cursor.fetchall()
-        return [f"{r['emp_first_name']} {r['emp_last_name'] or ''}".strip() for r in result]
+        return cursor.fetchall()
+
     except Exception as e:
+        print("Error fetching employees:", e)
         return []
+
+    finally:
+        conn.close()
+
+
+def fetch_all_sources():
+    """Fetch all lead sources from DB."""
+    conn = get_db()
+    if not conn:
+        return []
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+
+        query = """
+        SELECT source_id, source_name
+        FROM lead_sources
+        ORDER BY source_name ASC
+        """
+
+        cursor.execute(query)
+        return cursor.fetchall()
+
+    except Exception as e:
+        print("Error fetching lead sources:", e)
+        return []
+
+    finally:
+        conn.close()
+
+def fetch_all_statuses():
+    """Fetch all lead statuses from DB."""
+    conn = get_db()
+    if not conn:
+        return []
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+
+        query = """
+        SELECT status_id, status_name
+        FROM lead_status
+        ORDER BY status_name ASC
+        """
+
+        cursor.execute(query)
+        return cursor.fetchall()
+
+    except Exception as e:
+        print("Error fetching lead statuses:", e)
+        return []
+
     finally:
         conn.close()

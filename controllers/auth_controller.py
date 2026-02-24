@@ -4,7 +4,6 @@ from services.auth_service import AuthService
 from config import PRIVATE_KEY, JWT_ISSUER, JWT_AUDIENCE
 import logging
 logger = logging.getLogger(__name__)
-from decorators.auth_decorators import token_required
 
 
 auth_controller_bp = Blueprint("auth_controller", __name__)
@@ -41,16 +40,8 @@ def login():
 
     return jsonify({
         "access_token": token,
+        "emp_id": result["user_id"],
         "username": result["username"],
         "email": result["email"],
         "role_type": result["role_type"]
     }), 200
-
-@auth_controller_bp.route("/me", methods=["GET"])
-@token_required
-def me(decoded):
-    return {
-        "user_id": decoded["sub"],
-        "username": decoded["username"],
-        "role_type": decoded["role_type"]
-    }, 200

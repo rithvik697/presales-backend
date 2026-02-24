@@ -37,6 +37,7 @@ def create_user():
             }), 400
 
     try:
+        # User creation defaults to 'ADMIN' for created_by in service layer
         register_user(data)
         return jsonify({
             "success": True,

@@ -9,7 +9,7 @@ class ProjectService:
     # -----------------------------
     # Create Project
     # -----------------------------
-    def create_project(self, data):
+    def create_project(self, data, created_by=None):
         db = get_db()
         cursor = db.cursor()
         try:
@@ -47,13 +47,13 @@ class ProjectService:
                 data.get("number_of_units"),
                 data.get("rera_number"),
                 data.get("status", "NEW"),
-                data.get("created_by")
+                created_by   # always comes from the JWT token, never from request body
             )
 
             cursor.execute(sql, values)
             db.commit()
 
-            logger.info(f"Project {project_id} created")
+            logger.info(f"Project {project_id} created by {created_by}")
             return project_id
 
         except Exception as e:
@@ -62,6 +62,7 @@ class ProjectService:
             raise
         finally:
             db.close()
+
 
     # -----------------------------
     # Get All Projects (LIST VIEW)

@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from services.project_service import project_service
+from utils.token_helper import get_emp_id_from_token
 import traceback
 
 # Single Blueprint for all project APIs
@@ -18,7 +19,12 @@ def create_project():
         if not data:
             return jsonify({"error": "Invalid or missing JSON body"}), 400
 
-        project_id = project_service.create_project(data)
+        # Identify the caller from JWT — never trust the request body for this
+        created_by = get_emp_id_from_token()
+        if not created_by:
+            return jsonify({"error": "Unauthorized: valid token required"}), 401
+
+        project_id = project_service.create_project(data, created_by=created_by)
         return jsonify({
             "message": "Project created successfully",
             "project_id": project_id

@@ -33,7 +33,7 @@ class AuthService:
                     role_id,
                     last_login
                 FROM employee
-                WHERE username = %s OR email = %s
+                WHERE LOWER(username) = %s OR LOWER(email) = %s
             """, (username_clean, email_clean))
 
             user = cursor.fetchone()

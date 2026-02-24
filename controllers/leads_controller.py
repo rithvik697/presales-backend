@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from services import leads_service
+from utils.token_helper import get_emp_id_from_token
 
 leads_bp = Blueprint('leads', __name__)
 
@@ -11,21 +12,10 @@ def to_frontend_format(backend_lead):
     if not backend_lead:
         return None
     
-    # Parse Project from Description (Workaround for strict schema)
-    # Format: "Project: <Value> | <Description>"
     description = backend_lead.get('description') or ''
-    project = backend_lead.get('project') # Likely None from DB
+    project = backend_lead.get('project')
+    projectId = backend_lead.get('projectId')
     
-    if description.startswith('Project: '):
-        parts = description.split(' | ', 1)
-        project_part = parts[0]
-        # Extract value after "Project: "
-        project = project_part[9:] 
-        
-        # Clean description for display: Remove the Project prefix part entirely
-        description = parts[1] if len(parts) > 1 else ''
-
-
     return {
         'id': backend_lead.get('id'),
         'name': backend_lead.get('name'),
@@ -34,20 +24,20 @@ def to_frontend_format(backend_lead):
         'email': backend_lead.get('email'),
         'profession': backend_lead.get('profession'),
         'project': project, 
+        'projectId': projectId,
         'source': backend_lead.get('source'),
         'status': backend_lead.get('status'),
-        'assignedTo': backend_lead.get('assigned_to'), 
+        'assignedTo': backend_lead.get('assignedTo'), 
         'description': description,
         'createdAt': backend_lead.get('createdAt'),
-        'createdBy': backend_lead.get('created_by'),
+        'createdBy': backend_lead.get('createdBy'),
         'modifiedAt': backend_lead.get('modifiedAt'),
-        'modifiedBy': backend_lead.get('modified_by')
+        'modifiedBy': backend_lead.get('modifiedBy')
     }
 
 @leads_bp.route('', methods=['GET'])
 def get_leads():
     try:
-        # Extract query params for filtering
         filters = {
             'customer': request.args.get('customer'),
             'mobile': request.args.get('mobile'),
@@ -55,7 +45,6 @@ def get_leads():
             'employee': request.args.get('employee'),
             'project': request.args.get('project')
         }
-        
         leads = leads_service.fetch_all_leads(filters)
         return jsonify([to_frontend_format(lead) for lead in leads]), 200
     except Exception as e:
@@ -75,30 +64,31 @@ def get_lead(lead_id):
 @leads_bp.route('', methods=['POST'])
 def create_lead():
     try:
-        # Frontend sends CamelCase, we map to simpler dict for Service
         req_data = request.json
+
+        # Identify the caller from JWT — never trust the request body for this
+        actor_id = get_emp_id_from_token()
+        if not actor_id:
+            return jsonify({'error': 'Unauthorized: valid token required'}), 401
+
         data = {
             'name': req_data.get('name'),
             'phone': req_data.get('phone'),
             'email': req_data.get('email'),
-            'project': req_data.get('project'), # Needed to append to description
+            'project': req_data.get('project'),
             'source': req_data.get('source'),
             'status': req_data.get('status'),
             'assigned_to': req_data.get('assignedTo'),
             'description': req_data.get('description'),
             'alternate_phone': req_data.get('alternatePhone'),
             'profession': req_data.get('profession')
-
-
-
         }
-        
-        new_id = leads_service.add_new_lead(data)
+
+        new_id = leads_service.add_new_lead(data, actor_name=actor_id)
         return jsonify({'id': new_id, 'message': 'Lead created successfully'}), 201
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
-        print(f"Create Error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @leads_bp.route('/employees', methods=['GET'])
@@ -109,12 +99,32 @@ def get_employees():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@leads_bp.route('/sources', methods=['GET'])
+def get_all_sources():
+    try:
+        sources = leads_service.fetch_all_sources()
+        return jsonify(sources), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@leads_bp.route('/statuses', methods=['GET'])
+def get_all_statuses():
+    try:
+        statuses = leads_service.fetch_all_statuses()
+        return jsonify(statuses), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @leads_bp.route('/<string:lead_id>', methods=['PUT'])
 def update_lead(lead_id):
     try:
         data = request.json
-        # Map frontend keys to backend expected keys if necessary
-        # Backend expects: source, status, assigned_to, project, description, name, email
+
+        # Identify the caller from JWT — never trust the request body for this
+        actor_id = get_emp_id_from_token()
+        if not actor_id:
+            return jsonify({'error': 'Unauthorized: valid token required'}), 401
+
         update_data = {
             'name': data.get('name'),
             'email': data.get('email'),
@@ -125,12 +135,9 @@ def update_lead(lead_id):
             'description': data.get('description'),
             'alternate_phone': data.get('alternatePhone'),
             'profession': data.get('profession')
-
-
-
         }
-        
-        success = leads_service.update_existing_lead(lead_id, update_data)
+
+        success = leads_service.update_existing_lead(lead_id, update_data, actor_name=actor_id)
         if success:
             return jsonify({'message': 'Lead updated successfully'}), 200
         else:
