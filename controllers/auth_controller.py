@@ -16,8 +16,8 @@ auth_service = AuthService()
 def login():
     data = request.get_json() or {}
 
-    username = data.get("username")
-    email = data.get("email")
+    username = data.get("username").strip()
+    email = data.get("email").strip()
     password = data.get("password")
 
     if not username or not email or not password:
