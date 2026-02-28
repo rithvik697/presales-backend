@@ -4,8 +4,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class ProjectService:
 
+class ProjectService:
+    
     # -----------------------------
     # Create Project
     # -----------------------------
@@ -14,6 +15,27 @@ class ProjectService:
         cursor = db.cursor()
         try:
             project_id = data.get("project_id") or str(uuid.uuid4())
+
+            status = data.get("status")
+            rera_number = data.get("rera_number")
+            ALLOWED_PROJECT_TYPES = ["Villa", "Apartment"]
+
+            project_type = data.get("project_type")
+
+            if project_type not in ALLOWED_PROJECT_TYPES:
+                raise ValueError("Invalid project type")
+
+            # Allowed ENUM values (must match DB ENUM exactly)
+            ALLOWED_STATUSES = ["RERA_APPROVED", "COMPLETED", "PRE_LAUNCH"]
+
+            if status not in ALLOWED_STATUSES:
+                raise ValueError("Invalid project status")
+
+            # Conditional RERA rule
+            if status in ["RERA_APPROVED", "COMPLETED"] and not rera_number:
+                raise ValueError("RERA number is required for approved or completed projects")
+            
+
 
             sql = """
                 INSERT INTO project_registration (
@@ -46,7 +68,7 @@ class ProjectService:
                 data.get("total_area"),
                 data.get("number_of_units"),
                 data.get("rera_number"),
-                data.get("status", "NEW"),
+                data.get("status"),
                 data.get("created_by")
             )
 
@@ -115,7 +137,17 @@ class ProjectService:
     def update_project(self, project_id, data):
         db = get_db()
         cursor = db.cursor()
+        
         try:
+            # 🚨 Prevent status update from this API
+            if "status" in data:
+                raise ValueError("Use update_project_status API to update status")
+
+            # 🚨 Validate project_type if being updated
+            ALLOWED_PROJECT_TYPES = ["Villa", "Apartment"]
+            if "project_type" in data:
+                if data["project_type"] not in ALLOWED_PROJECT_TYPES:
+                    raise ValueError("Invalid project type")
             fields = []
             values = []
 
@@ -148,21 +180,41 @@ class ProjectService:
     # Update Project Status
     # -----------------------------
     def update_project_status(self, project_id, status):
-        db = get_db()
-        cursor = db.cursor()
-        try:
-            cursor.execute("""
-                UPDATE project_registration
-                SET status = %s, modified_on = NOW()
-                WHERE project_id = %s
-            """, (status, project_id))
+     db = get_db()
+     cursor = db.cursor(dictionary=True)
+     try:
+        ALLOWED_STATUSES = ["RERA_APPROVED", "COMPLETED", "PRE_LAUNCH"]
 
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        if status not in ALLOWED_STATUSES:
+            raise ValueError("Invalid project status")
 
+        # Fetch existing project
+        cursor.execute("""
+            SELECT rera_number
+            FROM project_registration
+            WHERE project_id = %s
+        """, (project_id,))
+        project = cursor.fetchone()
+
+        if not project:
+            raise ValueError("Project not found")
+
+        # Enforce RERA rule
+        if status in ["RERA_APPROVED", "COMPLETED"] and not project["rera_number"]:
+            raise ValueError("RERA number required before approving/completing project")
+
+        cursor.execute("""
+            UPDATE project_registration
+            SET status = %s, modified_on = NOW()
+            WHERE project_id = %s
+        """, (status, project_id))
+
+        db.commit()
+
+     except Exception:
+        db.rollback()
+        raise
+     finally:
+        db.close()
 
 project_service = ProjectService()
