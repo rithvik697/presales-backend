@@ -1,12 +1,36 @@
 from db import get_db
-import uuid
 import logging
 
 logger = logging.getLogger(__name__)
 
 
+def _generate_next_project_id(cursor):
+    """
+    Generate the next sequential project ID like PRJ001, PRJ002, etc.
+    Similar to employee ID generation.
+    """
+    cursor.execute(
+        """
+        SELECT project_id
+        FROM project_registration
+        WHERE project_id REGEXP '^PRJ[0-9]+$'
+        ORDER BY CAST(SUBSTRING(project_id, 4) AS UNSIGNED) DESC
+        LIMIT 1
+        FOR UPDATE
+        """
+    )
+
+    row = cursor.fetchone()
+    if not row or not row[0]:
+        return 'PRJ001'
+
+    current_id = row[0]
+    next_num = int(current_id[3:]) + 1
+    return f'PRJ{next_num:03d}'
+
+
 class ProjectService:
-    
+
     # -----------------------------
     # Create Project
     # -----------------------------
@@ -14,7 +38,7 @@ class ProjectService:
         db = get_db()
         cursor = db.cursor()
         try:
-            project_id = data.get("project_id") or str(uuid.uuid4())
+            project_id = _generate_next_project_id(cursor)
 
             status = data.get("status")
             rera_number = data.get("rera_number")
