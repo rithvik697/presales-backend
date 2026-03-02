@@ -1,8 +1,6 @@
 from flask import Blueprint, request, jsonify
 from services.project_service import project_service
 import traceback
-
-# Single Blueprint for all project APIs
 project_bp = Blueprint(
     "project_bp",
     __name__
@@ -19,14 +17,18 @@ def create_project():
             return jsonify({"error": "Invalid or missing JSON body"}), 400
 
         project_id = project_service.create_project(data)
+
         return jsonify({
             "message": "Project created successfully",
             "project_id": project_id
         }), 201
 
-    except Exception as e:
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+
+    except Exception:
         traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal Server Error"}), 500
 
 
 # -----------------------------
@@ -38,9 +40,9 @@ def get_all_projects():
         projects = project_service.get_all_projects()
         return jsonify(projects), 200
 
-    except Exception as e:
+    except Exception:
         traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal Server Error"}), 500
 
 
 # -----------------------------
@@ -56,13 +58,13 @@ def get_project_by_id(project_id):
 
         return jsonify(project), 200
 
-    except Exception as e:
+    except Exception:
         traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal Server Error"}), 500
 
 
 # -----------------------------
-# Update Project
+# Update Project (General Fields)
 # -----------------------------
 @project_bp.route('/projects/<project_id>', methods=['PUT'])
 def update_project(project_id):
@@ -72,28 +74,75 @@ def update_project(project_id):
             return jsonify({"error": "Invalid or missing JSON body"}), 400
 
         result = project_service.update_project(project_id, data)
+
+        if isinstance(result, dict) and result.get("message") == "Nothing to update":
+            return jsonify(result), 400
+
         return jsonify(result), 200
 
-    except Exception as e:
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+
+    except Exception:
         traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal Server Error"}), 500
 
 
 # -----------------------------
 # Update Project Status
 # -----------------------------
+@project_bp.route('/projects/status-options', methods=['GET'])
+def get_project_status_options():
+    try:
+        statuses = ["RERA_APPROVED", "COMPLETED", "PRE_LAUNCH"]
+
+        return jsonify([
+            {
+                "label": status.replace("_", " ").title(),
+                "value": status
+            }
+            for status in statuses
+        ]), 200
+
+    except Exception:
+        traceback.print_exc()
+        return jsonify({"error": "Internal Server Error"}), 500
+
+@project_bp.route('/projects/type-options', methods=['GET'])
+def get_project_type_options():
+    try:
+        types = ["Villa", "Apartment"]
+
+        return jsonify([
+            {
+                "label": t,
+                "value": t
+            }
+            for t in types
+        ]), 200
+
+    except Exception:
+        traceback.print_exc()
+        return jsonify({"error": "Internal Server Error"}), 500
+    
 @project_bp.route('/projects/<project_id>/status', methods=['PUT'])
 def update_project_status(project_id):
     try:
         data = request.get_json()
-        status = data.get("status") if data else None
+        if not data:
+            return jsonify({"error": "Invalid or missing JSON body"}), 400
 
+        status = data.get("status")
         if not status:
             return jsonify({"error": "Status is required"}), 400
 
         project_service.update_project_status(project_id, status)
-        return jsonify({"message": "Project status updated"}), 200
 
-    except Exception as e:
+        return jsonify({"message": "Project status updated successfully"}), 200
+
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+
+    except Exception:
         traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal Server Error"}), 500
