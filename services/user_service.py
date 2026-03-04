@@ -43,6 +43,7 @@ def register_user(data):
 
     try:
         conn = get_db()
+        _ensure_phone_column(conn)
         cursor = conn.cursor()
 
         emp_id = generate_emp_id()
@@ -78,7 +79,7 @@ def register_user(data):
             emp_id,
             data['emp_first_name'],
             data.get('emp_middle_name'),
-            data['emp_last_name'],
+            data['emp_last_name'].strip(),
             data['role_id'],
             data['emp_status'],
             data.get('phone_num'),
@@ -91,6 +92,7 @@ def register_user(data):
 
         cursor.execute(query, values)
         conn.commit()
+        return new_emp_id
 
         return {
             "emp_id": emp_id,
@@ -111,11 +113,9 @@ def register_user(data):
             conn.close()
 
 
-# -------------------------
-# GET ALL USERS
-# -------------------------
 def get_all_users():
     conn = get_db()
+    _ensure_phone_column(conn)
     cursor = conn.cursor(dictionary=True)
 
     query = """
@@ -151,6 +151,7 @@ def get_all_users():
 # -------------------------
 def get_user_by_id(emp_id):
     conn = get_db()
+    _ensure_phone_column(conn)
     cursor = conn.cursor(dictionary=True)
 
     query = """
@@ -186,6 +187,7 @@ def get_user_by_id(emp_id):
 # -------------------------
 def update_user(emp_id, data):
     conn = get_db()
+    _ensure_phone_column(conn)
     cursor = conn.cursor()
 
     query = """
@@ -204,9 +206,9 @@ def update_user(emp_id, data):
     """
 
     values = (
-        data['emp_first_name'],
+        data['emp_first_name'].strip(),
         data.get('emp_middle_name'),
-        data['emp_last_name'],
+        data['emp_last_name'].strip(),
         data['role_id'],
         data['emp_status'],
         data.get('phone_num'),  # ✅ FIXED
