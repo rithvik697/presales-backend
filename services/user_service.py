@@ -2,41 +2,69 @@ from db import get_db
 from datetime import datetime
 import mysql.connector
 from werkzeug.security import generate_password_hash
-import secrets
+import re
 
 
-# -------------------------
-# GENERATE NEXT EMPLOYEE ID
-# -------------------------
-def generate_emp_id():
-    conn = get_db()
+def _ensure_phone_column(conn):
     cursor = conn.cursor()
+    try:
+        cursor.execute("SHOW COLUMNS FROM employee LIKE 'phone_num'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE employee ADD COLUMN phone_num VARCHAR(20) NULL AFTER emp_status")
+            conn.commit()
+    finally:
+        cursor.close()
 
-    cursor.execute("""
+
+def _generate_next_emp_id(cursor):
+    cursor.execute(
+        """
         SELECT emp_id
         FROM employee
-        ORDER BY emp_id DESC
+        WHERE emp_id REGEXP '^EMP[0-9]+$'
+        ORDER BY CAST(SUBSTRING(emp_id, 4) AS UNSIGNED) DESC
         LIMIT 1
-    """)
+        FOR UPDATE
+        """
+    )
 
-    result = cursor.fetchone()
+    row = cursor.fetchone()
+    if not row or not row[0]:
+        return 'EMP001'
 
-    cursor.close()
-    conn.close()
+    current_id = row[0]
+    next_num = int(current_id[3:]) + 1
+    return f'EMP{next_num:03d}'
 
-    if result:
-        last_id = result[0]
-        number = int(last_id.replace("EMP", ""))
-        new_number = number + 1
+
+def _slug_username(value):
+    username = re.sub(r'[^a-z0-9._]', '', str(value).lower())
+    return username[:100]
+
+
+def _generate_unique_username(cursor, data, emp_id):
+    requested = (data.get('username') or '').strip().lower()
+    if requested:
+        base = _slug_username(requested)
     else:
-        new_number = 1
+        email = (data.get('email') or '').strip().lower()
+        email_local = email.split('@')[0] if '@' in email else email
+        name_based = f"{data.get('emp_first_name', '')}.{data.get('emp_last_name', '')}".strip('.')
+        base = _slug_username(email_local or name_based or emp_id.lower())
 
-    return f"EMP{str(new_number).zfill(3)}"
+    if not base:
+        base = emp_id.lower()
+
+    candidate = base
+    suffix = 1
+    while True:
+        cursor.execute("SELECT 1 FROM employee WHERE username = %s LIMIT 1", (candidate,))
+        if cursor.fetchone() is None:
+            return candidate
+        suffix += 1
+        candidate = f"{base}{suffix}"[:100]
 
 
-# -------------------------
-# CREATE USER (Scrypt Only)
-# -------------------------
 def register_user(data):
     conn = None
     cursor = None
@@ -46,16 +74,10 @@ def register_user(data):
         _ensure_phone_column(conn)
         cursor = conn.cursor()
 
-        emp_id = generate_emp_id()
-
-        username = data['username']
-        temp_password = secrets.token_urlsafe(8)
-
-        # ✅ STANDARDIZED PASSWORD HASHING (SCRYPT ONLY)
-        password_hash = generate_password_hash(
-            temp_password,
-            method='scrypt'
-        )
+        new_emp_id = _generate_next_emp_id(cursor)
+        username = _generate_unique_username(cursor, data, new_emp_id)
+        raw_password = str(data.get('password') or 'Welcome@123')
+        password_hash = generate_password_hash(raw_password, method='scrypt')
 
         query = """
             INSERT INTO employee (
@@ -66,45 +88,36 @@ def register_user(data):
                 role_id,
                 emp_status,
                 phone_num,
-                created_by,
-                created_on,
                 username,
                 email,
-                password_hash
+                password_hash,
+                created_by,
+                created_on
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
         values = (
-            emp_id,
-            data['emp_first_name'],
+            new_emp_id,
+            data['emp_first_name'].strip(),
             data.get('emp_middle_name'),
             data['emp_last_name'].strip(),
             data['role_id'],
             data['emp_status'],
-            data.get('phone_num'),
-            data.get('created_by', 'ADMIN'),
-            datetime.now(),
+            str(data['phone_num']).strip(),
             username,
-            data['email'],
-            password_hash
+            data['email'].strip().lower(),
+            password_hash,
+            data.get('created_by', 'ADMIN'),
+            datetime.now()
         )
 
         cursor.execute(query, values)
         conn.commit()
         return new_emp_id
 
-        return {
-            "emp_id": emp_id,
-            "username": username,
-            "temporary_password": temp_password
-        }
-
-    except mysql.connector.IntegrityError:
-        raise Exception("Username or Email already exists")
-
-    except Exception as e:
-        raise Exception(f"Failed to register user: {str(e)}")
+    except mysql.connector.IntegrityError as e:
+        raise Exception(f'Employee already exists or invalid role/email data: {e}')
 
     finally:
         if cursor:
@@ -126,13 +139,12 @@ def get_all_users():
             emp_last_name,
             role_id,
             emp_status,
-            phone_num,   -- ✅ FIXED
+            phone_num,
+            email,
             created_by,
             created_on,
             modified_by,
-            modified_on,
-            username,
-            email
+            modified_on
         FROM employee
         ORDER BY created_on DESC
     """
@@ -146,9 +158,6 @@ def get_all_users():
     return users
 
 
-# -------------------------
-# GET USER BY EMP ID
-# -------------------------
 def get_user_by_id(emp_id):
     conn = get_db()
     _ensure_phone_column(conn)
@@ -162,13 +171,12 @@ def get_user_by_id(emp_id):
             emp_last_name,
             role_id,
             emp_status,
-            phone_num,   -- ✅ FIXED
+            phone_num,
+            email,
             created_by,
             created_on,
             modified_by,
-            modified_on,
-            username,
-            email
+            modified_on
         FROM employee
         WHERE emp_id = %s
     """
@@ -182,9 +190,6 @@ def get_user_by_id(emp_id):
     return user
 
 
-# -------------------------
-# UPDATE USER
-# -------------------------
 def update_user(emp_id, data):
     conn = get_db()
     _ensure_phone_column(conn)
@@ -198,7 +203,7 @@ def update_user(emp_id, data):
             emp_last_name = %s,
             role_id = %s,
             emp_status = %s,
-            phone_num = %s,  -- ✅ FIXED
+            phone_num = %s,
             email = %s,
             modified_by = %s,
             modified_on = %s
@@ -211,8 +216,8 @@ def update_user(emp_id, data):
         data['emp_last_name'].strip(),
         data['role_id'],
         data['emp_status'],
-        data.get('phone_num'),  # ✅ FIXED
-        data['email'],
+        str(data['phone_num']).strip(),
+        data['email'].strip().lower(),
         data.get('modified_by', 'ADMIN'),
         datetime.now(),
         emp_id
@@ -229,68 +234,21 @@ def update_user(emp_id, data):
     return updated
 
 
-# -------------------------
-# UPDATE USER STATUS
-# -------------------------
-def update_user_status(emp_id, new_status):
+def update_user_status(emp_id, status):
     conn = get_db()
     cursor = conn.cursor()
 
-    query = """
+    cursor.execute("""
         UPDATE employee
-        SET
-            emp_status = %s,
-            modified_by = %s,
-            modified_on = %s
+        SET emp_status = %s
         WHERE emp_id = %s
-    """
+    """, (status, emp_id))
 
-    values = (
-        new_status,
-        'ADMIN',
-        datetime.now(),
-        emp_id
-    )
-
-    cursor.execute(query, values)
     conn.commit()
 
-    updated = cursor.rowcount > 0
+    updated_rows = cursor.rowcount
 
     cursor.close()
     conn.close()
 
-    return updated
-
-
-# -------------------------
-# DELETE USER (SOFT DELETE)
-# -------------------------
-def delete_user_by_id(emp_id):
-    conn = get_db()
-    cursor = conn.cursor()
-
-    query = """
-        UPDATE employee
-        SET
-            emp_status = 'Inactive',
-            modified_by = %s,
-            modified_on = %s
-        WHERE emp_id = %s
-    """
-
-    values = (
-        'ADMIN',
-        datetime.now(),
-        emp_id
-    )
-
-    cursor.execute(query, values)
-    conn.commit()
-
-    deleted = cursor.rowcount > 0
-
-    cursor.close()
-    conn.close()
-
-    return deleted
+    return updated_rows > 0
