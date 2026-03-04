@@ -1,5 +1,3 @@
-from db import get_db 
-
 from flask import Blueprint, request, jsonify
 from services.user_service import (
     register_user,
@@ -12,22 +10,23 @@ from services.user_service import (
 user_controller_bp = Blueprint(
     'user_controller_bp',
     __name__,
-    url_prefix='/api'   # ✅ IMPORTANT
+    url_prefix='/api'
 )
 
 # -------------------------
-# CREATE USER
+# CREATE USER (Auto emp_id)
 # -------------------------
 @user_controller_bp.route('/users/register', methods=['POST'])
 def create_user():
     data = request.json
 
     required_fields = [
-        'emp_id',
         'emp_first_name',
         'emp_last_name',
         'role_id',
-        'emp_status'
+        'emp_status',
+        'email',
+        'username'
     ]
 
     for field in required_fields:
@@ -38,10 +37,12 @@ def create_user():
             }), 400
 
     try:
-        register_user(data)
+        new_emp_id = register_user(data)
+
         return jsonify({
             "success": True,
-            "message": "User created successfully"
+            "message": "User created successfully",
+            "emp_id": new_emp_id
         }), 201
 
     except Exception as e:
@@ -123,9 +124,9 @@ def update_user_controller(emp_id):
         }), 500
 
 
-# ===========================================
-# UPDATE ONLY USER STATUS (TOGGLE)
-# ===========================================
+# -------------------------
+# UPDATE USER STATUS ONLY
+# -------------------------
 @user_controller_bp.route('/users/<emp_id>/status', methods=['PUT'])
 def update_user_status_controller(emp_id):
 
@@ -152,6 +153,25 @@ def update_user_status_controller(emp_id):
             "message": "Status updated successfully"
         }), 200
 
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+        
+
+
+# -------------------------
+# DELETE USER 
+# -------------------------
+@user_controller_bp.route('/users/<emp_id>', methods=['DELETE'])
+def delete_user(emp_id):
+    try:
+        delete_user_by_id(emp_id)
+        return jsonify({
+            "success": True,
+            "message": "User deleted successfully"
+        }), 200
     except Exception as e:
         return jsonify({
             "success": False,
