@@ -4,27 +4,20 @@ from services.user_service import (
     register_user,
     get_all_users,
     get_user_by_id,
-    update_user
+    update_user,
+    update_user_status
 )
 import re
 
 user_controller_bp = Blueprint(
     'user_controller_bp',
-    __name__
+    __name__,
+    url_prefix='/api'
 )
 
-EMAIL_REGEX = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
-PHONE_REGEX = re.compile(r'^\d{10}$')
-
-
-def _is_valid_email(email):
-    return bool(email and EMAIL_REGEX.match(email.strip()))
-
-
-def _is_valid_phone(phone):
-    return bool(phone and PHONE_REGEX.match(str(phone).strip()))
-
-
+# -------------------------
+# CREATE USER (Auto emp_id)
+# -------------------------
 @user_controller_bp.route('/users/register', methods=['POST'])
 def create_user():
     data = request.json or {}
@@ -34,8 +27,8 @@ def create_user():
         'emp_last_name',
         'role_id',
         'emp_status',
-        'phone_num',
-        'email'
+        'email',
+        'username'
     ]
 
     for field in required_fields:
@@ -59,12 +52,11 @@ def create_user():
 
     try:
         new_emp_id = register_user(data)
+
         return jsonify({
-            'success': True,
-            'message': 'User created successfully',
-            'data': {
-                'emp_id': new_emp_id
-            }
+            "success": True,
+            "message": "User created successfully",
+            "emp_id": new_emp_id
         }), 201
 
     except Exception as e:
@@ -89,6 +81,9 @@ def fetch_users():
         }), 500
 
 
+# -------------------------
+# GET USER BY EMP ID
+# -------------------------
 @user_controller_bp.route('/users/<emp_id>', methods=['GET'])
 def fetch_user_by_id_controller(emp_id):
     try:
@@ -112,6 +107,9 @@ def fetch_user_by_id_controller(emp_id):
         }), 500
 
 
+# -------------------------
+# UPDATE FULL USER
+# -------------------------
 @user_controller_bp.route('/users/<emp_id>', methods=['PUT'])
 def update_user_controller(emp_id):
     data = request.json or {}
@@ -178,4 +176,59 @@ def update_status(emp_id):
         return jsonify({
             "success": False,
             "error": str(e)
-        }), 500 
+        }), 500
+
+
+# -------------------------
+# UPDATE USER STATUS ONLY
+# -------------------------
+@user_controller_bp.route('/users/<emp_id>/status', methods=['PUT'])
+def update_user_status_controller(emp_id):
+
+    data = request.json
+    new_status = data.get('emp_status')
+
+    if new_status not in ['Active', 'Inactive']:
+        return jsonify({
+            "success": False,
+            "error": "Invalid status"
+        }), 400
+
+    try:
+        updated = update_user_status(emp_id, new_status)
+
+        if not updated:
+            return jsonify({
+                "success": False,
+                "error": "User not found"
+            }), 404
+
+        return jsonify({
+            "success": True,
+            "message": "Status updated successfully"
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+        
+
+
+# -------------------------
+# DELETE USER 
+# -------------------------
+@user_controller_bp.route('/users/<emp_id>', methods=['DELETE'])
+def delete_user(emp_id):
+    try:
+        delete_user_by_id(emp_id)
+        return jsonify({
+            "success": True,
+            "message": "User deleted successfully"
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
