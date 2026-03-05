@@ -4,7 +4,8 @@ from services.user_service import (
     get_all_users,
     get_user_by_id,
     update_user,
-    update_user_status
+    update_user_status,
+    delete_user_by_id
 )
 
 user_controller_bp = Blueprint(
@@ -37,12 +38,12 @@ def create_user():
             }), 400
 
     try:
-        new_emp_id = register_user(data)
+        user_data = register_user(data)
 
         return jsonify({
             "success": True,
             "message": "User created successfully",
-            "emp_id": new_emp_id
+            "data": user_data
         }), 201
 
     except Exception as e:

@@ -3,6 +3,7 @@ from datetime import datetime
 import mysql.connector
 from werkzeug.security import generate_password_hash
 import secrets
+from services.email_service import send_temp_password_email
 
 
 # -------------------------
@@ -92,6 +93,12 @@ def register_user(data):
         cursor.execute(query, values)
         conn.commit()
 
+        send_temp_password_email(
+            data["email"],
+            username,
+            temp_password
+        )
+
         return {
             "emp_id": emp_id,
             "username": username,
@@ -109,6 +116,7 @@ def register_user(data):
             cursor.close()
         if conn:
             conn.close()
+
 
 
 # -------------------------
