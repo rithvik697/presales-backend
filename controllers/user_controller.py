@@ -4,7 +4,8 @@ from services.user_service import (
     get_all_users,
     get_user_by_id,
     update_user,
-    update_user_status
+    update_user_status,
+    delete_user_by_id
 )
 
 user_controller_bp = Blueprint(
@@ -101,6 +102,7 @@ def fetch_user_by_id_controller(emp_id):
 # -------------------------
 @user_controller_bp.route('/users/<emp_id>', methods=['PUT'])
 def update_user_controller(emp_id):
+
     data = request.json
 
     try:
@@ -131,7 +133,9 @@ def update_user_controller(emp_id):
 def update_user_status_controller(emp_id):
 
     data = request.json
+
     new_status = data.get('emp_status')
+    modified_by = data.get('modified_by', 'ADMIN')
 
     if new_status not in ['Active', 'Inactive']:
         return jsonify({
@@ -140,7 +144,7 @@ def update_user_status_controller(emp_id):
         }), 400
 
     try:
-        updated = update_user_status(emp_id, new_status)
+        updated = update_user_status(emp_id, new_status, modified_by)
 
         if not updated:
             return jsonify({
@@ -158,20 +162,31 @@ def update_user_status_controller(emp_id):
             "success": False,
             "error": str(e)
         }), 500
-        
 
 
 # -------------------------
-# DELETE USER 
+# DELETE USER
 # -------------------------
 @user_controller_bp.route('/users/<emp_id>', methods=['DELETE'])
 def delete_user(emp_id):
+
+    data = request.json or {}
+    modified_by = data.get('modified_by', 'ADMIN')
+
     try:
-        delete_user_by_id(emp_id)
+        deleted = delete_user_by_id(emp_id, modified_by)
+
+        if not deleted:
+            return jsonify({
+                "success": False,
+                "error": "User not found"
+            }), 404
+
         return jsonify({
             "success": True,
             "message": "User deleted successfully"
         }), 200
+
     except Exception as e:
         return jsonify({
             "success": False,
