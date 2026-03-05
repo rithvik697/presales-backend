@@ -27,7 +27,12 @@ class AuthService:
                     password_hash,
                     emp_status,
                     role_id,
-                    last_login
+                    last_login,
+                    CONCAT(
+                        emp_first_name,
+                        COALESCE(CONCAT(' ', emp_middle_name), ''),
+                        COALESCE(CONCAT(' ', emp_last_name), '')
+                    ) AS full_name
                 FROM employee
                 WHERE username = %s AND email = %s
             """, (username.lower(), email.lower()))
@@ -63,6 +68,7 @@ class AuthService:
             return {
                 "user_id": user["user_id"],
                 "username": user["username"],
+                "full_name": user["full_name"],
                 "role_type": user["role_id"]
             }
 

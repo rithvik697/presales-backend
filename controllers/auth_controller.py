@@ -31,6 +31,7 @@ def login():
     payload = {
         "sub": str(result["user_id"]),
         "username": result["username"],
+        "full_name": result["full_name"],
         "role_type": result["role_type"],
         "iss": JWT_ISSUER,
         "aud": JWT_AUDIENCE,
@@ -42,6 +43,7 @@ def login():
     return jsonify({
         "access_token": token,
         "username": result["username"],
+        "full_name": result["full_name"],
         "role_type": result["role_type"]
     }), 200
 
