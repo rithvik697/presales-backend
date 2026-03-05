@@ -1,3 +1,4 @@
+from services.lead_status_history_service import create_history
 from db import get_db
 import logging
 
@@ -335,6 +336,13 @@ def add_new_lead(data, actor_id=None):
             (new_lead_id, customer_id, source_id, status_id, emp_id,
              project_id, description, actor_id)
         )
+
+        initial_history = {
+            "new_status_id": status_id,
+            "remarks": "Lead created"
+        }
+
+        create_history(new_lead_id, initial_history, actor_id)
 
         conn.commit()
         logger.info(f"Lead {new_lead_id} created by {actor_id}")

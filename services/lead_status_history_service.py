@@ -81,33 +81,27 @@ def get_history_entry(history_id):
 def create_history(lead_id, data, emp_id):
     """
     Log a status change and update the lead's current status.
-
-    Steps:
-      1. Read lead's current status_id → becomes old_status_id
-      2. Insert row into lead_status_history
-      3. Update leads.status_id to the new status
-
-    Args:
-        lead_id:  str (VARCHAR 150)
-        data:     dict with new_status_id (required), remarks (optional)
-        emp_id:   str — employee ID from JWT token
     """
+
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
+
     try:
-        # 1. Get current status
+        # Get current status
         cursor.execute(
             "SELECT status_id FROM leads WHERE lead_id = %s",
             (lead_id,)
         )
         lead = cursor.fetchone()
+
         if not lead:
             raise ValueError(f"Lead {lead_id} not found")
 
         old_status_id = lead.get('status_id')
         new_status_id = data.get('new_status_id')
+        remarks = data.get('remarks', '')   # <-- DEFINE IT HERE
 
-        # 2. Insert history row
+        # Insert history row
         cursor.execute("""
             INSERT INTO lead_status_history
                 (lead_id, old_status_id, new_status_id, remarks, changed_by)
@@ -116,24 +110,35 @@ def create_history(lead_id, data, emp_id):
             lead_id,
             old_status_id,
             new_status_id,
-            data.get('remarks', ''),
+            remarks,
             emp_id
         ))
+
         new_id = cursor.lastrowid
 
-        # 3. Update lead's current status
+        # Update lead status + description
         cursor.execute("""
             UPDATE leads
-            SET status_id = %s, modified_by = %s, modified_on = NOW()
+            SET status_id = %s,
+                lead_description = %s,
+                modified_by = %s,
+                modified_on = NOW()
             WHERE lead_id = %s
-        """, (new_status_id, emp_id, lead_id))
+        """, (
+            new_status_id,
+            remarks,
+            emp_id,
+            lead_id
+        ))
 
         conn.commit()
+
         return get_history_entry(new_id)
 
     except Exception as e:
         conn.rollback()
         raise e
+
     finally:
         cursor.close()
         conn.close()
