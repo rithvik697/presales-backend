@@ -7,6 +7,7 @@ from services.user_service import (
     update_user_status,
     delete_user_by_id
 )
+from decorators.auth_decorators import token_required
 
 user_controller_bp = Blueprint(
     'user_controller_bp',
@@ -14,37 +15,36 @@ user_controller_bp = Blueprint(
     url_prefix='/api'
 )
 
+
 # -------------------------
 # CREATE USER (Auto emp_id)
 # -------------------------
 @user_controller_bp.route('/users/register', methods=['POST'])
-def create_user():
+@token_required
+def create_user(decoded):
     data = request.json
 
-    required_fields = [
-        'emp_first_name',
-        'emp_last_name',
-        'role_id',
-        'emp_status',
-        'email',
-        'username'
-    ]
-
-    for field in required_fields:
-        if field not in data or not data[field]:
-            return jsonify({
-                "success": False,
-                "error": f"{field} is required"
-            }), 400
+    if not data:
+        return jsonify({
+            "success": False,
+            "error": "Request body is required"
+        }), 400
 
     try:
-        user_data = register_user(data)
+        current_user = decoded.get('username', 'ADMIN')
+        user_data = register_user(data, created_by=current_user)
 
         return jsonify({
             "success": True,
             "message": "User created successfully",
             "data": user_data
         }), 201
+
+    except ValueError as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400
 
     except Exception as e:
         return jsonify({
@@ -57,7 +57,8 @@ def create_user():
 # GET ALL USERS
 # -------------------------
 @user_controller_bp.route('/users', methods=['GET'])
-def fetch_users():
+@token_required
+def fetch_users(decoded):
     try:
         users = get_all_users()
         return jsonify({
@@ -75,7 +76,8 @@ def fetch_users():
 # GET USER BY EMP ID
 # -------------------------
 @user_controller_bp.route('/users/<emp_id>', methods=['GET'])
-def fetch_user_by_id_controller(emp_id):
+@token_required
+def fetch_user_by_id_controller(decoded, emp_id):
     try:
         user = get_user_by_id(emp_id)
 
@@ -101,22 +103,36 @@ def fetch_user_by_id_controller(emp_id):
 # UPDATE FULL USER
 # -------------------------
 @user_controller_bp.route('/users/<emp_id>', methods=['PUT'])
-def update_user_controller(emp_id):
+@token_required
+def update_user_controller(decoded, emp_id):
     data = request.json
 
+    if not data:
+        return jsonify({
+            "success": False,
+            "error": "Request body is required"
+        }), 400
+
     try:
-        updated = update_user(emp_id, data)
+        current_user = decoded.get('username', 'ADMIN')
+        updated = update_user(emp_id, data, modified_by=current_user)
 
         if not updated:
             return jsonify({
                 "success": False,
-                "error": "User not found"
+                "error": "User not found or no changes made"
             }), 404
 
         return jsonify({
             "success": True,
             "message": "User updated successfully"
         }), 200
+
+    except ValueError as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400
 
     except Exception as e:
         return jsonify({
@@ -129,19 +145,27 @@ def update_user_controller(emp_id):
 # UPDATE USER STATUS ONLY
 # -------------------------
 @user_controller_bp.route('/users/<emp_id>/status', methods=['PUT'])
-def update_user_status_controller(emp_id):
-
+@token_required
+def update_user_status_controller(decoded, emp_id):
     data = request.json
+
+    if not data:
+        return jsonify({
+            "success": False,
+            "error": "Request body is required"
+        }), 400
+
     new_status = data.get('emp_status')
 
     if new_status not in ['Active', 'Inactive']:
         return jsonify({
             "success": False,
-            "error": "Invalid status"
+            "error": "Invalid status. Must be 'Active' or 'Inactive'"
         }), 400
 
     try:
-        updated = update_user_status(emp_id, new_status)
+        current_user = decoded.get('username', 'ADMIN')
+        updated = update_user_status(emp_id, new_status, modified_by=current_user)
 
         if not updated:
             return jsonify({
@@ -159,20 +183,29 @@ def update_user_status_controller(emp_id):
             "success": False,
             "error": str(e)
         }), 500
-        
 
 
 # -------------------------
-# DELETE USER 
+# DELETE USER (SOFT DELETE)
 # -------------------------
 @user_controller_bp.route('/users/<emp_id>', methods=['DELETE'])
-def delete_user(emp_id):
+@token_required
+def delete_user(decoded, emp_id):
     try:
-        delete_user_by_id(emp_id)
+        current_user = decoded.get('username', 'ADMIN')
+        deleted = delete_user_by_id(emp_id, modified_by=current_user)
+
+        if not deleted:
+            return jsonify({
+                "success": False,
+                "error": "User not found"
+            }), 404
+
         return jsonify({
             "success": True,
             "message": "User deleted successfully"
         }), 200
+
     except Exception as e:
         return jsonify({
             "success": False,
