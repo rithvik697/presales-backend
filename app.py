@@ -18,7 +18,7 @@ app.register_blueprint(project_bp, url_prefix="/api")
 app.register_blueprint(call_logs_bp, url_prefix="/api/calls")
 app.register_blueprint(user_controller_bp, url_prefix="/api")
 app.register_blueprint(leads_bp, url_prefix="/api/leads")
-app.register_blueprint(lead_status_history_bp)
+app.register_blueprint(lead_status_history_bp, url_prefix='/api')
 
 
 if __name__ == "__main__":

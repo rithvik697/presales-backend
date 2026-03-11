@@ -11,7 +11,7 @@ from services.lead_status_history_service import (
 lead_status_history_bp = Blueprint('lead_status_history', __name__)
 
 
-@lead_status_history_bp.route('/api/leads/<lead_id>/status-history', methods=['GET'])
+@lead_status_history_bp.route('/leads/<lead_id>/status-history', methods=['GET'])
 @token_required
 def list_history(decoded, lead_id):
     try:
@@ -22,7 +22,7 @@ def list_history(decoded, lead_id):
         return jsonify({'error': str(e)}), 500
 
 
-@lead_status_history_bp.route('/api/leads/<lead_id>/status-history', methods=['POST'])
+@lead_status_history_bp.route('/leads/<lead_id>/status-history', methods=['POST'])
 @token_required
 def add_history(decoded, lead_id):
     g.user = decoded
@@ -48,7 +48,7 @@ def add_history(decoded, lead_id):
         return jsonify({'error': str(e)}), 500
 
 
-@lead_status_history_bp.route('/api/leads/<lead_id>/status-history/<int:history_id>', methods=['PUT'])
+@lead_status_history_bp.route('/leads/<lead_id>/status-history/<int:history_id>', methods=['PUT'])
 @token_required
 def edit_history(decoded, lead_id, history_id):
     g.user = decoded
@@ -71,7 +71,7 @@ def edit_history(decoded, lead_id, history_id):
         return jsonify({'error': str(e)}), 500
 
 
-@lead_status_history_bp.route('/api/leads/<lead_id>/status-history/<int:history_id>', methods=['DELETE'])
+@lead_status_history_bp.route('/leads/<lead_id>/status-history/<int:history_id>', methods=['DELETE'])
 @token_required
 def remove_history(decoded, lead_id, history_id):
     g.user = decoded
@@ -93,7 +93,7 @@ def remove_history(decoded, lead_id, history_id):
         return jsonify({'error': str(e)}), 500
 
 
-@lead_status_history_bp.route('/api/status-options', methods=['GET'])
+@lead_status_history_bp.route('/status-options', methods=['GET'])
 @token_required
 def list_status_options(decoded):
     try:

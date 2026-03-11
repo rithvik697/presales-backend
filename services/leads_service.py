@@ -342,10 +342,10 @@ def add_new_lead(data, actor_id=None):
             "remarks": "Lead created"
         }
 
-        create_history(new_lead_id, initial_history, actor_id)
 
         conn.commit()
         logger.info(f"Lead {new_lead_id} created by {actor_id}")
+        create_history(new_lead_id, initial_history, actor_id)
         return new_lead_id
 
     except ValueError:
