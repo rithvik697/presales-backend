@@ -7,6 +7,7 @@ from controllers.call_logs_controller import call_logs_bp
 from controllers.user_controller import user_controller_bp 
 from controllers.auth_controller import auth_controller_bp
 from controllers.leads_controller import leads_bp
+from controllers.reports_controller import reports_bp
 
 # Import DB
 from db import get_db
@@ -20,6 +21,7 @@ app.register_blueprint(project_bp, url_prefix="/api")
 app.register_blueprint(call_logs_bp, url_prefix="/api/calls")
 app.register_blueprint(user_controller_bp, url_prefix="/api")
 app.register_blueprint(leads_bp, url_prefix="/api/leads")
+app.register_blueprint(reports_bp, url_prefix="/api/reports")
 
 
 if __name__ == "__main__":
