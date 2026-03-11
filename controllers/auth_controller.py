@@ -76,3 +76,55 @@ def change_password(decoded):
         return jsonify({"message": "Old password incorrect"}), 400
 
     return jsonify({"message": "Password updated successfully"}), 200
+@auth_controller_bp.route("/forgot-password", methods=["POST"])
+def forgot_password():
+
+    data = request.json
+    email = data.get("email")
+
+    if not email:
+        return jsonify({
+            "success": False,
+            "error": "Email is required"
+        }), 400
+
+    try:
+        auth_service.forgot_password(email)
+
+        return jsonify({
+            "success": True,
+            "message": "Password reset email sent"
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+    
+@auth_controller_bp.route("/reset-password", methods=["POST"])
+def reset_password():
+
+    data = request.json
+    token = data.get("token")
+    new_password = data.get("password")
+
+    if not token or not new_password:
+        return jsonify({
+            "success": False,
+            "error": "Token and password are required"
+        }), 400
+
+    try:
+        auth_service.reset_password(token, new_password)
+
+        return jsonify({
+            "success": True,
+            "message": "Password reset successful"
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400

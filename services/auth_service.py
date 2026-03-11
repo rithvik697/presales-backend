@@ -1,6 +1,11 @@
 from werkzeug.security import check_password_hash, generate_password_hash
 from db import get_db
 import logging
+import jwt
+import datetime
+from config import PRIVATE_KEY, PUBLIC_KEY
+from services.email_service import send_reset_email
+
 logger = logging.getLogger(__name__)
 
 
@@ -79,7 +84,98 @@ class AuthService:
         finally:
             cursor.close()
             db.close()
-    
+
+
+    def forgot_password(self, email):
+
+        db = get_db()
+        cursor = db.cursor(dictionary=True)
+
+        try:
+            cursor.execute(
+                "SELECT emp_id FROM employee WHERE email=%s",
+                (email.lower(),)
+            )
+
+            user = cursor.fetchone()
+
+            if not user:
+                raise Exception("Email not found")
+
+            payload = {
+                "sub": user["emp_id"],
+                "purpose": "password_reset",
+                "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=15)
+            }
+
+            token = jwt.encode(payload, PRIVATE_KEY, algorithm="RS256")
+
+            reset_link = f"http://localhost:4200/reset-password?token={token}"
+
+            send_reset_email(email, reset_link)
+
+            logger.info(f"Password reset email sent to {email}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Forgot password error: {e}")
+            raise e
+
+        finally:
+            cursor.close()
+            db.close()
+
+
+    def reset_password(self, token, new_password):
+
+        try:
+            decoded = jwt.decode(
+                token,
+                PUBLIC_KEY,
+                algorithms=["RS256"]
+            )
+
+            if decoded.get("purpose") != "password_reset":
+                raise Exception("Invalid reset token")
+
+            emp_id = decoded["sub"]
+
+        except jwt.ExpiredSignatureError:
+            raise Exception("Reset link expired")
+
+        except jwt.InvalidTokenError:
+            raise Exception("Invalid reset token")
+
+        password_hash = generate_password_hash(
+            new_password,
+            method="scrypt"
+        )
+
+        db = get_db()
+        cursor = db.cursor()
+
+        try:
+            cursor.execute("""
+                UPDATE employee
+                SET password_hash=%s
+                WHERE emp_id=%s
+            """, (password_hash, emp_id))
+
+            db.commit()
+
+            logger.info(f"Password successfully reset for employee {emp_id}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Reset password error: {e}")
+            raise e
+
+        finally:
+            cursor.close()
+            db.close()
+            
     def change_password(self, user_id, old_password, new_password):
 
         db = get_db()

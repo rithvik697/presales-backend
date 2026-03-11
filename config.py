@@ -19,3 +19,8 @@ JWT_AUDIENCE = os.getenv("JWT_AUDIENCE")
 
 if not PRIVATE_KEY or not PUBLIC_KEY:
     raise RuntimeError("JWT keys not configured")
+
+SMTP_EMAIL = os.getenv("SMTP_EMAIL")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+SMTP_SERVER = os.getenv("SMTP_SERVER")
+SMTP_PORT = int(os.getenv("SMTP_PORT", 587))

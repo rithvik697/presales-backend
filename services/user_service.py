@@ -2,82 +2,78 @@ from db import get_db
 from datetime import datetime
 import mysql.connector
 from werkzeug.security import generate_password_hash
-import re
+import secrets
+from services.audit_service import log_audit
+from services.email_service import send_temp_password_email
 
 
-def _ensure_phone_column(conn):
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SHOW COLUMNS FROM employee LIKE 'phone_num'")
-        if cursor.fetchone() is None:
-            cursor.execute("ALTER TABLE employee ADD COLUMN phone_num VARCHAR(20) NULL AFTER emp_status")
-            conn.commit()
-    finally:
-        cursor.close()
+# -------------------------
+# REQUIRED FIELDS
+# -------------------------
+REQUIRED_CREATE_FIELDS = ['username', 'emp_first_name', 'emp_last_name', 'role_id', 'emp_status', 'email']
+REQUIRED_UPDATE_FIELDS = ['emp_first_name', 'emp_last_name', 'role_id', 'emp_status', 'email']
 
 
-def _generate_next_emp_id(cursor):
-    cursor.execute(
-        """
+# -------------------------
+# INPUT VALIDATION HELPER
+# -------------------------
+def _validate_fields(data, required_fields):
+    missing = [f for f in required_fields if not data.get(f)]
+    if missing:
+        raise ValueError(f"Missing required fields: {', '.join(missing)}")
+
+
+# -------------------------
+# GENERATE NEXT EMPLOYEE ID (RACE-CONDITION SAFE)
+# -------------------------
+def _generate_emp_id(cursor):
+    """
+    Generate next EMP ID using SELECT ... FOR UPDATE to prevent
+    two concurrent requests from getting the same ID.
+    Must be called inside an active transaction.
+    """
+    cursor.execute("""
         SELECT emp_id
         FROM employee
-        WHERE emp_id REGEXP '^EMP[0-9]+$'
-        ORDER BY CAST(SUBSTRING(emp_id, 4) AS UNSIGNED) DESC
+        ORDER BY emp_id DESC
         LIMIT 1
         FOR UPDATE
-        """
-    )
+    """)
 
-    row = cursor.fetchone()
-    if not row or not row[0]:
-        return 'EMP001'
+    result = cursor.fetchone()
 
-    current_id = row[0]
-    next_num = int(current_id[3:]) + 1
-    return f'EMP{next_num:03d}'
-
-
-def _slug_username(value):
-    username = re.sub(r'[^a-z0-9._]', '', str(value).lower())
-    return username[:100]
-
-
-def _generate_unique_username(cursor, data, emp_id):
-    requested = (data.get('username') or '').strip().lower()
-    if requested:
-        base = _slug_username(requested)
+    if result:
+        last_id = result[0] if isinstance(result, tuple) else result['emp_id']
+        number = int(last_id.replace("EMP", ""))
+        new_number = number + 1
     else:
-        email = (data.get('email') or '').strip().lower()
-        email_local = email.split('@')[0] if '@' in email else email
-        name_based = f"{data.get('emp_first_name', '')}.{data.get('emp_last_name', '')}".strip('.')
-        base = _slug_username(email_local or name_based or emp_id.lower())
+        new_number = 1
 
-    if not base:
-        base = emp_id.lower()
-
-    candidate = base
-    suffix = 1
-    while True:
-        cursor.execute("SELECT 1 FROM employee WHERE username = %s LIMIT 1", (candidate,))
-        if cursor.fetchone() is None:
-            return candidate
-        suffix += 1
-        candidate = f"{base}{suffix}"[:100]
+    return f"EMP{str(new_number).zfill(3)}"
 
 
-def register_user(data):
+# -------------------------
+# CREATE USER
+# -------------------------
+def register_user(data, created_by='ADMIN'):
+    _validate_fields(data, REQUIRED_CREATE_FIELDS)
+
     conn = None
     cursor = None
 
     try:
         conn = get_db()
-        _ensure_phone_column(conn)
         cursor = conn.cursor()
 
-        new_emp_id = _generate_next_emp_id(cursor)
-        username = _generate_unique_username(cursor, data, new_emp_id)
-        raw_password = str(data.get('password') or 'Welcome@123')
-        password_hash = generate_password_hash(raw_password, method='scrypt')
+        emp_id = _generate_emp_id(cursor)
+
+        username = data['username']
+        temp_password = secrets.token_urlsafe(8)
+
+        password_hash = generate_password_hash(
+            temp_password,
+            method='scrypt'
+        )
 
         query = """
             INSERT INTO employee (
@@ -88,36 +84,75 @@ def register_user(data):
                 role_id,
                 emp_status,
                 phone_num,
+                created_by,
+                created_on,
                 username,
                 email,
-                password_hash,
-                created_by,
-                created_on
+                password_hash
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
         values = (
-            new_emp_id,
-            data['emp_first_name'].strip(),
+            emp_id,
+            data['emp_first_name'],
             data.get('emp_middle_name'),
-            data['emp_last_name'].strip(),
+            data['emp_last_name'],
             data['role_id'],
             data['emp_status'],
-            str(data['phone_num']).strip(),
+            data.get('phone_num'),
+            created_by,
+            datetime.now(),
             username,
-            data['email'].strip().lower(),
-            password_hash,
-            data.get('created_by', 'ADMIN'),
-            datetime.now()
+            data['email'],
+            password_hash
         )
 
         cursor.execute(query, values)
         conn.commit()
-        return new_emp_id
 
-    except mysql.connector.IntegrityError as e:
-        raise Exception(f'Employee already exists or invalid role/email data: {e}')
+        # Send temporary password email
+        try:
+            send_temp_password_email(
+                data["email"],
+                username,
+                temp_password
+            )
+        except Exception as e:
+            print(f"Email send failed for {username}: {e}")
+
+        # Audit log
+        try:
+            log_audit(
+                object_name="employee",
+                object_id=emp_id,
+                property_name="USER_CREATED",
+                old_value=None,
+                new_value=f"User {emp_id} created",
+                modified_by=created_by,
+                action_type="INSERT"
+            )
+        except Exception as e:
+            print(f"Audit log failed: {e}")
+
+        return {
+            "emp_id": emp_id,
+            "username": username,
+            "temporary_password": temp_password
+        }
+
+    except mysql.connector.IntegrityError:
+        if conn:
+            conn.rollback()
+        raise Exception("Username or Email already exists")
+
+    except ValueError:
+        raise
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Failed to register user: {str(e)}")
 
     finally:
         if cursor:
@@ -126,129 +161,338 @@ def register_user(data):
             conn.close()
 
 
+# -------------------------
+# GET ALL USERS
+# -------------------------
 def get_all_users():
-    conn = get_db()
-    _ensure_phone_column(conn)
-    cursor = conn.cursor(dictionary=True)
+    conn = None
+    cursor = None
 
-    query = """
-        SELECT
-            emp_id,
-            emp_first_name,
-            emp_middle_name,
-            emp_last_name,
-            role_id,
-            emp_status,
-            phone_num,
-            email,
-            created_by,
-            created_on,
-            modified_by,
-            modified_on
-        FROM employee
-        ORDER BY created_on DESC
-    """
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
 
-    cursor.execute(query)
-    users = cursor.fetchall()
+        query = """
+            SELECT
+                emp_id,
+                emp_first_name,
+                emp_middle_name,
+                emp_last_name,
+                role_id,
+                emp_status,
+                phone_num,
+                created_by,
+                created_on,
+                modified_by,
+                modified_on,
+                username,
+                email
+            FROM employee
+            ORDER BY created_on DESC
+        """
 
-    cursor.close()
-    conn.close()
+        cursor.execute(query)
+        users = cursor.fetchall()
+        return users
 
-    return users
+    except Exception as e:
+        raise Exception(f"Failed to fetch users: {str(e)}")
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
+# -------------------------
+# GET USER BY EMP ID
+# -------------------------
 def get_user_by_id(emp_id):
-    conn = get_db()
-    _ensure_phone_column(conn)
-    cursor = conn.cursor(dictionary=True)
+    conn = None
+    cursor = None
 
-    query = """
-        SELECT
-            emp_id,
-            emp_first_name,
-            emp_middle_name,
-            emp_last_name,
-            role_id,
-            emp_status,
-            phone_num,
-            email,
-            created_by,
-            created_on,
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        query = """
+            SELECT
+                emp_id,
+                emp_first_name,
+                emp_middle_name,
+                emp_last_name,
+                role_id,
+                emp_status,
+                phone_num,
+                created_by,
+                created_on,
+                modified_by,
+                modified_on,
+                username,
+                email
+            FROM employee
+            WHERE emp_id = %s
+        """
+
+        cursor.execute(query, (emp_id,))
+        user = cursor.fetchone()
+        return user
+
+    except Exception as e:
+        raise Exception(f"Failed to fetch user {emp_id}: {str(e)}")
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+# -------------------------
+# UPDATE USER
+# -------------------------
+def update_user(emp_id, data, modified_by='ADMIN'):
+    _validate_fields(data, REQUIRED_UPDATE_FIELDS)
+
+    conn = None
+    cursor = None
+
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        # Fetch old values for audit trail
+        cursor.execute("SELECT * FROM employee WHERE emp_id = %s", (emp_id,))
+        old_record = cursor.fetchone()
+
+        if not old_record:
+            raise Exception(f"User {emp_id} not found")
+
+        # Switch to plain cursor for UPDATE
+        cursor.close()
+        cursor = conn.cursor()
+
+        query = """
+            UPDATE employee
+            SET
+                emp_first_name = %s,
+                emp_middle_name = %s,
+                emp_last_name = %s,
+                role_id = %s,
+                emp_status = %s,
+                phone_num = %s,
+                email = %s,
+                modified_by = %s,
+                modified_on = %s
+            WHERE emp_id = %s
+        """
+
+        values = (
+            data['emp_first_name'],
+            data.get('emp_middle_name'),
+            data['emp_last_name'],
+            data['role_id'],
+            data['emp_status'],
+            data.get('phone_num'),
+            data['email'],
             modified_by,
-            modified_on
-        FROM employee
-        WHERE emp_id = %s
-    """
+            datetime.now(),
+            emp_id
+        )
 
-    cursor.execute(query, (emp_id,))
-    user = cursor.fetchone()
+        cursor.execute(query, values)
+        conn.commit()
 
-    cursor.close()
-    conn.close()
+        updated = cursor.rowcount > 0
 
-    return user
+        if updated:
+            # Log each changed field for a meaningful audit trail
+            tracked_fields = {
+                'emp_first_name': 'First Name',
+                'emp_last_name': 'Last Name',
+                'emp_middle_name': 'Middle Name',
+                'role_id': 'Role',
+                'emp_status': 'Status',
+                'phone_num': 'Phone',
+                'email': 'Email'
+            }
 
+            for db_field, display_name in tracked_fields.items():
+                old_val = old_record.get(db_field)
+                new_val = data.get(db_field)
 
-def update_user(emp_id, data):
-    conn = get_db()
-    _ensure_phone_column(conn)
-    cursor = conn.cursor()
+                if str(old_val or '') != str(new_val or ''):
+                    try:
+                        log_audit(
+                            object_name="employee",
+                            object_id=emp_id,
+                            property_name=db_field,
+                            old_value=str(old_val) if old_val else None,
+                            new_value=str(new_val) if new_val else None,
+                            modified_by=modified_by,
+                            action_type="UPDATE"
+                        )
+                    except Exception as e:
+                        print(f"Audit log failed for {db_field}: {e}")
 
-    query = """
-        UPDATE employee
-        SET
-            emp_first_name = %s,
-            emp_middle_name = %s,
-            emp_last_name = %s,
-            role_id = %s,
-            emp_status = %s,
-            phone_num = %s,
-            email = %s,
-            modified_by = %s,
-            modified_on = %s
-        WHERE emp_id = %s
-    """
+        return updated
 
-    values = (
-        data['emp_first_name'].strip(),
-        data.get('emp_middle_name'),
-        data['emp_last_name'].strip(),
-        data['role_id'],
-        data['emp_status'],
-        str(data['phone_num']).strip(),
-        data['email'].strip().lower(),
-        data.get('modified_by', 'ADMIN'),
-        datetime.now(),
-        emp_id
-    )
+    except ValueError:
+        raise
 
-    cursor.execute(query, values)
-    conn.commit()
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Failed to update user {emp_id}: {str(e)}")
 
-    updated = cursor.rowcount > 0
-
-    cursor.close()
-    conn.close()
-
-    return updated
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
-def update_user_status(emp_id, status):
-    conn = get_db()
-    cursor = conn.cursor()
+# -------------------------
+# UPDATE USER STATUS
+# -------------------------
+def update_user_status(emp_id, new_status, modified_by='ADMIN'):
+    conn = None
+    cursor = None
 
-    cursor.execute("""
-        UPDATE employee
-        SET emp_status = %s
-        WHERE emp_id = %s
-    """, (status, emp_id))
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
 
-    conn.commit()
+        # Fetch old status for audit
+        cursor.execute("SELECT emp_status FROM employee WHERE emp_id = %s", (emp_id,))
+        old_record = cursor.fetchone()
 
-    updated_rows = cursor.rowcount
+        if not old_record:
+            raise Exception(f"User {emp_id} not found")
 
-    cursor.close()
-    conn.close()
+        old_status = old_record['emp_status']
 
-    return updated_rows > 0
+        # Switch to plain cursor for UPDATE
+        cursor.close()
+        cursor = conn.cursor()
+
+        query = """
+            UPDATE employee
+            SET
+                emp_status = %s,
+                modified_by = %s,
+                modified_on = %s
+            WHERE emp_id = %s
+        """
+
+        values = (
+            new_status,
+            modified_by,
+            datetime.now(),
+            emp_id
+        )
+
+        cursor.execute(query, values)
+        conn.commit()
+
+        updated = cursor.rowcount > 0
+
+        if updated:
+            try:
+                log_audit(
+                    object_name="employee",
+                    object_id=emp_id,
+                    property_name="emp_status",
+                    old_value=old_status,
+                    new_value=new_status,
+                    modified_by=modified_by,
+                    action_type="UPDATE"
+                )
+            except Exception as e:
+                print(f"Audit log failed: {e}")
+
+        return updated
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Failed to update status for {emp_id}: {str(e)}")
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+# -------------------------
+# DELETE USER (SOFT DELETE)
+# -------------------------
+def delete_user_by_id(emp_id, modified_by='ADMIN'):
+    conn = None
+    cursor = None
+
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        # Fetch old status for audit
+        cursor.execute("SELECT emp_status FROM employee WHERE emp_id = %s", (emp_id,))
+        old_record = cursor.fetchone()
+
+        if not old_record:
+            raise Exception(f"User {emp_id} not found")
+
+        old_status = old_record['emp_status']
+
+        # Switch to plain cursor for UPDATE
+        cursor.close()
+        cursor = conn.cursor()
+
+        query = """
+            UPDATE employee
+            SET
+                emp_status = 'Inactive',
+                modified_by = %s,
+                modified_on = %s
+            WHERE emp_id = %s
+        """
+
+        values = (
+            modified_by,
+            datetime.now(),
+            emp_id
+        )
+
+        cursor.execute(query, values)
+        conn.commit()
+
+        deleted = cursor.rowcount > 0
+
+        if deleted:
+            try:
+                log_audit(
+                    object_name="employee",
+                    object_id=emp_id,
+                    property_name="emp_status",
+                    old_value=old_status,
+                    new_value="Inactive",
+                    modified_by=modified_by,
+                    action_type="DELETE"
+                )
+            except Exception as e:
+                print(f"Audit log failed: {e}")
+
+        return deleted
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Failed to delete user {emp_id}: {str(e)}")
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
