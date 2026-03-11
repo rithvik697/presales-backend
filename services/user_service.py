@@ -4,46 +4,29 @@ import mysql.connector
 from werkzeug.security import generate_password_hash
 import secrets
 from services.audit_service import log_audit
-from services.email_service import send_temp_password_email
 
 
 # -------------------------
-# REQUIRED FIELDS
+# GENERATE NEXT EMPLOYEE ID
 # -------------------------
-REQUIRED_CREATE_FIELDS = ['username', 'emp_first_name', 'emp_last_name', 'role_id', 'emp_status', 'email']
-REQUIRED_UPDATE_FIELDS = ['emp_first_name', 'emp_last_name', 'role_id', 'emp_status', 'email']
+def generate_emp_id():
+    conn = get_db()
+    cursor = conn.cursor()
 
-
-# -------------------------
-# INPUT VALIDATION HELPER
-# -------------------------
-def _validate_fields(data, required_fields):
-    missing = [f for f in required_fields if not data.get(f)]
-    if missing:
-        raise ValueError(f"Missing required fields: {', '.join(missing)}")
-
-
-# -------------------------
-# GENERATE NEXT EMPLOYEE ID (RACE-CONDITION SAFE)
-# -------------------------
-def _generate_emp_id(cursor):
-    """
-    Generate next EMP ID using SELECT ... FOR UPDATE to prevent
-    two concurrent requests from getting the same ID.
-    Must be called inside an active transaction.
-    """
     cursor.execute("""
         SELECT emp_id
         FROM employee
         ORDER BY emp_id DESC
         LIMIT 1
-        FOR UPDATE
     """)
 
     result = cursor.fetchone()
 
+    cursor.close()
+    conn.close()
+
     if result:
-        last_id = result[0] if isinstance(result, tuple) else result['emp_id']
+        last_id = result[0]
         number = int(last_id.replace("EMP", ""))
         new_number = number + 1
     else:
@@ -55,9 +38,7 @@ def _generate_emp_id(cursor):
 # -------------------------
 # CREATE USER
 # -------------------------
-def register_user(data, created_by='ADMIN'):
-    _validate_fields(data, REQUIRED_CREATE_FIELDS)
-
+def register_user(data):
     conn = None
     cursor = None
 
@@ -65,7 +46,7 @@ def register_user(data, created_by='ADMIN'):
         conn = get_db()
         cursor = conn.cursor()
 
-        emp_id = _generate_emp_id(cursor)
+        emp_id = generate_emp_id()
 
         username = data['username']
         temp_password = secrets.token_urlsafe(8)
@@ -101,7 +82,7 @@ def register_user(data, created_by='ADMIN'):
             data['role_id'],
             data['emp_status'],
             data.get('phone_num'),
-            created_by,
+            data.get('created_by', 'ADMIN'),
             datetime.now(),
             username,
             data['email'],
@@ -112,17 +93,6 @@ def register_user(data, created_by='ADMIN'):
         conn.commit()
 
         # AUDIT LOG
-        # Send temporary password email
-        try:
-            send_temp_password_email(
-                data["email"],
-                username,
-                temp_password
-            )
-        except Exception as e:
-            print(f"Email send failed for {username}: {e}")
-
-        # Audit log
         try:
             log_audit(
                 object_name="employee",
@@ -143,16 +113,9 @@ def register_user(data, created_by='ADMIN'):
         }
 
     except mysql.connector.IntegrityError:
-        if conn:
-            conn.rollback()
         raise Exception("Username or Email already exists")
 
-    except ValueError:
-        raise
-
     except Exception as e:
-        if conn:
-            conn.rollback()
         raise Exception(f"Failed to register user: {str(e)}")
 
     finally:
@@ -166,88 +129,70 @@ def register_user(data, created_by='ADMIN'):
 # GET ALL USERS
 # -------------------------
 def get_all_users():
-    conn = None
-    cursor = None
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
 
-    try:
-        conn = get_db()
-        cursor = conn.cursor(dictionary=True)
+    query = """
+        SELECT
+            emp_id,
+            emp_first_name,
+            emp_middle_name,
+            emp_last_name,
+            role_id,
+            emp_status,
+            phone_num,
+            created_by,
+            created_on,
+            modified_by,
+            modified_on,
+            username,
+            email
+        FROM employee
+        ORDER BY created_on DESC
+    """
 
-        query = """
-            SELECT
-                emp_id,
-                emp_first_name,
-                emp_middle_name,
-                emp_last_name,
-                role_id,
-                emp_status,
-                phone_num,
-                created_by,
-                created_on,
-                modified_by,
-                modified_on,
-                username,
-                email
-            FROM employee
-            ORDER BY created_on DESC
-        """
+    cursor.execute(query)
+    users = cursor.fetchall()
 
-        cursor.execute(query)
-        users = cursor.fetchall()
-        return users
+    cursor.close()
+    conn.close()
 
-    except Exception as e:
-        raise Exception(f"Failed to fetch users: {str(e)}")
-
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+    return users
 
 
 # -------------------------
 # GET USER BY EMP ID
 # -------------------------
 def get_user_by_id(emp_id):
-    conn = None
-    cursor = None
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
 
-    try:
-        conn = get_db()
-        cursor = conn.cursor(dictionary=True)
+    query = """
+        SELECT
+            emp_id,
+            emp_first_name,
+            emp_middle_name,
+            emp_last_name,
+            role_id,
+            emp_status,
+            phone_num,
+            created_by,
+            created_on,
+            modified_by,
+            modified_on,
+            username,
+            email
+        FROM employee
+        WHERE emp_id = %s
+    """
 
-        query = """
-            SELECT
-                emp_id,
-                emp_first_name,
-                emp_middle_name,
-                emp_last_name,
-                role_id,
-                emp_status,
-                phone_num,
-                created_by,
-                created_on,
-                modified_by,
-                modified_on,
-                username,
-                email
-            FROM employee
-            WHERE emp_id = %s
-        """
+    cursor.execute(query, (emp_id,))
+    user = cursor.fetchone()
 
-        cursor.execute(query, (emp_id,))
-        user = cursor.fetchone()
-        return user
+    cursor.close()
+    conn.close()
 
-    except Exception as e:
-        raise Exception(f"Failed to fetch user {emp_id}: {str(e)}")
-
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+    return user
 
 
 # -------------------------
@@ -302,24 +247,7 @@ def update_user(emp_id, data):
     cursor.execute(update_query, values)
     conn.commit()
 
-        # Switch to plain cursor for UPDATE
-        cursor.close()
-        cursor = conn.cursor()
-
-        query = """
-            UPDATE employee
-            SET
-                emp_first_name = %s,
-                emp_middle_name = %s,
-                emp_last_name = %s,
-                role_id = %s,
-                emp_status = %s,
-                phone_num = %s,
-                email = %s,
-                modified_by = %s,
-                modified_on = %s
-            WHERE emp_id = %s
-        """
+    updated = cursor.rowcount > 0
 
     # -------------------------
     # AUDIT TRAIL (Field-Level Logging)
@@ -359,72 +287,53 @@ def update_user(emp_id, data):
     cursor.close()
     conn.close()
 
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+    return updated
 
 # -------------------------
 # UPDATE USER STATUS
 # -------------------------
-def update_user_status(emp_id, new_status, modified_by='ADMIN'):
-    conn = None
-    cursor = None
+def update_user_status(emp_id, new_status, modified_by="ADMIN"):
 
-    try:
-        conn = get_db()
-        cursor = conn.cursor(dictionary=True)
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
 
-        # Fetch old status for audit
-        cursor.execute("SELECT emp_status FROM employee WHERE emp_id = %s", (emp_id,))
-        old_record = cursor.fetchone()
+    # Get current status
+    cursor.execute(
+        "SELECT emp_status FROM employee WHERE emp_id = %s",
+        (emp_id,)
+    )
 
-        if not old_record:
-            raise Exception(f"User {emp_id} not found")
+    row = cursor.fetchone()
 
-        old_status = old_record['emp_status']
-
-        # Switch to plain cursor for UPDATE
+    if not row:
         cursor.close()
-        cursor = conn.cursor()
+        conn.close()
+        return False
 
-        query = """
-            UPDATE employee
-            SET
-                emp_status = %s,
-                modified_by = %s,
-                modified_on = %s
-            WHERE emp_id = %s
-        """
+    old_status = row["emp_status"]
 
-        values = (
-            new_status,
-            modified_by,
-            datetime.now(),
-            emp_id
-        )
+    update_query = """
+        UPDATE employee
+        SET
+            emp_status = %s,
+            modified_by = %s,
+            modified_on = %s
+        WHERE emp_id = %s
+    """
 
-        cursor.execute(query, values)
-        conn.commit()
+    cursor.execute(update_query, (
+        new_status,
+        modified_by,
+        datetime.now(),
+        emp_id
+    ))
 
-        updated = cursor.rowcount > 0
+    conn.commit()
 
-        if updated:
-            try:
-                log_audit(
-                    object_name="employee",
-                    object_id=emp_id,
-                    property_name="emp_status",
-                    old_value=old_status,
-                    new_value=new_status,
-                    modified_by=modified_by,
-                    action_type="UPDATE"
-                )
-            except Exception as e:
-                print(f"Audit log failed: {e}")
+    updated = cursor.rowcount > 0
 
-        return updated
+    cursor.close()
+    conn.close()
 
     if updated:
         try:
@@ -477,27 +386,10 @@ def delete_user_by_id(emp_id, modified_by="ADMIN"):
 
     conn.commit()
 
-        # Switch to plain cursor for UPDATE
-        cursor.close()
-        cursor = conn.cursor()
+    deleted = cursor.rowcount > 0
 
-        query = """
-            UPDATE employee
-            SET
-                emp_status = 'Inactive',
-                modified_by = %s,
-                modified_on = %s
-            WHERE emp_id = %s
-        """
-
-        values = (
-            modified_by,
-            datetime.now(),
-            emp_id
-        )
-
-        cursor.execute(query, values)
-        conn.commit()
+    cursor.close()
+    conn.close()
 
     if deleted:
         try:
