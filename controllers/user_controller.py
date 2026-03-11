@@ -156,6 +156,7 @@ def update_user_status_controller(decoded, emp_id):
         }), 400
 
     new_status = data.get('emp_status')
+    modified_by = data.get('modified_by', 'ADMIN')
 
     if new_status not in ['Active', 'Inactive']:
         return jsonify({
