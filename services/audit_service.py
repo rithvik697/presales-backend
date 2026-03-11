@@ -5,7 +5,6 @@ from db import get_db
 # INSERT AUDIT LOG (Already Working)
 # --------------------------------
 def log_audit(object_name, object_id, property_name, old_value, new_value, modified_by, action_type):
-
     conn = None
     cursor = None
 
