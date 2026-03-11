@@ -111,7 +111,6 @@ def register_user(data, created_by='ADMIN'):
         cursor.execute(query, values)
         conn.commit()
 
-        # AUDIT LOG
         # Send temporary password email
         try:
             send_temp_password_email(
@@ -130,11 +129,11 @@ def register_user(data, created_by='ADMIN'):
                 property_name="USER_CREATED",
                 old_value=None,
                 new_value=f"User {emp_id} created",
-                modified_by=data.get('created_by', username),
+                modified_by=created_by,
                 action_type="INSERT"
             )
         except Exception as e:
-            print("Audit log failed:", e)
+            print(f"Audit log failed: {e}")
 
         return {
             "emp_id": emp_id,
@@ -253,54 +252,22 @@ def get_user_by_id(emp_id):
 # -------------------------
 # UPDATE USER
 # -------------------------
-def update_user(emp_id, data):
+def update_user(emp_id, data, modified_by='ADMIN'):
+    _validate_fields(data, REQUIRED_UPDATE_FIELDS)
 
-    conn = get_db()
-    cursor = conn.cursor(dictionary=True)
+    conn = None
+    cursor = None
 
-    modified_by = data.get("modified_by", "ADMIN")
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
 
-    # -------------------------
-    # Get existing data (for audit comparison)
-    # -------------------------
-    cursor.execute("SELECT * FROM employee WHERE emp_id = %s", (emp_id,))
-    old_user = cursor.fetchone()
+        # Fetch old values for audit trail
+        cursor.execute("SELECT * FROM employee WHERE emp_id = %s", (emp_id,))
+        old_record = cursor.fetchone()
 
-    if not old_user:
-        cursor.close()
-        conn.close()
-        return False
-
-    update_query = """
-        UPDATE employee
-        SET
-            emp_first_name = %s,
-            emp_middle_name = %s,
-            emp_last_name = %s,
-            role_id = %s,
-            emp_status = %s,
-            phone_num = %s,
-            email = %s,
-            modified_by = %s,
-            modified_on = %s
-        WHERE emp_id = %s
-    """
-
-    values = (
-        data['emp_first_name'],
-        data.get('emp_middle_name'),
-        data['emp_last_name'],
-        data['role_id'],
-        data['emp_status'],
-        data.get('phone_num'),
-        data['email'],
-        modified_by,
-        datetime.now(),
-        emp_id
-    )
-
-    cursor.execute(update_query, values)
-    conn.commit()
+        if not old_record:
+            raise Exception(f"User {emp_id} not found")
 
         # Switch to plain cursor for UPDATE
         cursor.close()
@@ -321,49 +288,70 @@ def update_user(emp_id, data):
             WHERE emp_id = %s
         """
 
-    # -------------------------
-    # AUDIT TRAIL (Field-Level Logging)
-    # -------------------------
-    if updated:
+        values = (
+            data['emp_first_name'],
+            data.get('emp_middle_name'),
+            data['emp_last_name'],
+            data['role_id'],
+            data['emp_status'],
+            data.get('phone_num'),
+            data['email'],
+            modified_by,
+            datetime.now(),
+            emp_id
+        )
 
-        fields_to_track = [
-            "emp_first_name",
-            "emp_middle_name",
-            "emp_last_name",
-            "role_id",
-            "emp_status",
-            "phone_num",
-            "email"
-        ]
+        cursor.execute(query, values)
+        conn.commit()
 
-        for field in fields_to_track:
+        updated = cursor.rowcount > 0
 
-            old_value = old_user.get(field)
-            new_value = data.get(field)
+        if updated:
+            # Log each changed field for a meaningful audit trail
+            tracked_fields = {
+                'emp_first_name': 'First Name',
+                'emp_last_name': 'Last Name',
+                'emp_middle_name': 'Middle Name',
+                'role_id': 'Role',
+                'emp_status': 'Status',
+                'phone_num': 'Phone',
+                'email': 'Email'
+            }
 
-            if str(old_value) != str(new_value):
+            for db_field, display_name in tracked_fields.items():
+                old_val = old_record.get(db_field)
+                new_val = data.get(db_field)
 
-                try:
-                    log_audit(
-                        object_name="employee",
-                        object_id=emp_id,
-                        property_name=field,
-                        old_value=old_value,
-                        new_value=new_value,
-                        modified_by=modified_by,
-                        action_type="UPDATE"
-                    )
-                except Exception as e:
-                    print("Audit log failed:", e)
+                if str(old_val or '') != str(new_val or ''):
+                    try:
+                        log_audit(
+                            object_name="employee",
+                            object_id=emp_id,
+                            property_name=db_field,
+                            old_value=str(old_val) if old_val else None,
+                            new_value=str(new_val) if new_val else None,
+                            modified_by=modified_by,
+                            action_type="UPDATE"
+                        )
+                    except Exception as e:
+                        print(f"Audit log failed for {db_field}: {e}")
 
-    cursor.close()
-    conn.close()
+        return updated
+
+    except ValueError:
+        raise
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Failed to update user {emp_id}: {str(e)}")
 
     finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
+
 
 # -------------------------
 # UPDATE USER STATUS
@@ -426,56 +414,37 @@ def update_user_status(emp_id, new_status, modified_by='ADMIN'):
 
         return updated
 
-    if updated:
-        try:
-            log_audit(
-                object_name="employee",
-                object_id=emp_id,
-                property_name="emp_status",
-                old_value=old_status,
-                new_value=new_status,
-                modified_by=modified_by,
-                action_type="UPDATE"
-            )
-        except Exception as e:
-            print("Audit log failed:", e)
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Failed to update status for {emp_id}: {str(e)}")
 
-    return updated
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
 # -------------------------
 # DELETE USER (SOFT DELETE)
 # -------------------------
-def delete_user_by_id(emp_id, modified_by="ADMIN"):
+def delete_user_by_id(emp_id, modified_by='ADMIN'):
+    conn = None
+    cursor = None
 
-    conn = get_db()
-    cursor = conn.cursor(dictionary=True)
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
 
-    # Get old status
-    cursor.execute(
-        "SELECT emp_status FROM employee WHERE emp_id = %s",
-        (emp_id,)
-    )
+        # Fetch old status for audit
+        cursor.execute("SELECT emp_status FROM employee WHERE emp_id = %s", (emp_id,))
+        old_record = cursor.fetchone()
 
-    row = cursor.fetchone()
-    old_status = row["emp_status"] if row else None
+        if not old_record:
+            raise Exception(f"User {emp_id} not found")
 
-    query = """
-        UPDATE employee
-        SET
-            emp_status = 'Inactive',
-            modified_by = %s,
-            modified_on = %s
-        WHERE emp_id = %s
-    """
-
-    cursor.execute(query, (
-        modified_by,
-        datetime.now(),
-        emp_id
-    ))
-
-    conn.commit()
+        old_status = old_record['emp_status']
 
         # Switch to plain cursor for UPDATE
         cursor.close()
@@ -499,18 +468,31 @@ def delete_user_by_id(emp_id, modified_by="ADMIN"):
         cursor.execute(query, values)
         conn.commit()
 
-    if deleted:
-        try:
-            log_audit(
-                object_name="employee",
-                object_id=emp_id,
-                property_name="emp_status",
-                old_value=old_status,
-                new_value="Inactive",
-                modified_by=modified_by,
-                action_type="DELETE"
-            )
-        except Exception as e:
-            print("Audit log failed:", e)
+        deleted = cursor.rowcount > 0
 
-    return deleted
+        if deleted:
+            try:
+                log_audit(
+                    object_name="employee",
+                    object_id=emp_id,
+                    property_name="emp_status",
+                    old_value=old_status,
+                    new_value="Inactive",
+                    modified_by=modified_by,
+                    action_type="DELETE"
+                )
+            except Exception as e:
+                print(f"Audit log failed: {e}")
+
+        return deleted
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Failed to delete user {emp_id}: {str(e)}")
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
