@@ -31,6 +31,7 @@ def login():
     payload = {
         "sub": str(result["user_id"]),
         "username": result["username"],
+        "full_name": result["full_name"],
         "role_type": result["role_type"],
         "iss": JWT_ISSUER,
         "aud": JWT_AUDIENCE,
@@ -42,6 +43,7 @@ def login():
     return jsonify({
         "access_token": token,
         "username": result["username"],
+        "full_name": result["full_name"],
         "role_type": result["role_type"]
     }), 200
 
@@ -54,6 +56,26 @@ def me(decoded):
         "role_type": decoded["role_type"]
     }, 200
 
+@auth_controller_bp.route("/change-password", methods=["PUT"])
+@token_required
+def change_password(decoded):
+
+    data = request.get_json() or {}
+
+    old_password = data.get("old_password")
+    new_password = data.get("new_password")
+
+    if not old_password or not new_password:
+        return jsonify({"message": "Missing password fields"}), 400
+
+    user_id = decoded["sub"]
+
+    result = auth_service.change_password(user_id, old_password, new_password)
+
+    if not result:
+        return jsonify({"message": "Old password incorrect"}), 400
+
+    return jsonify({"message": "Password updated successfully"}), 200
 @auth_controller_bp.route("/forgot-password", methods=["POST"])
 def forgot_password():
 

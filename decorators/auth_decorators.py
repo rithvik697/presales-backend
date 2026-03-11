@@ -1,5 +1,5 @@
 from functools import wraps
-from flask import request, jsonify
+from flask import request, jsonify,g
 import jwt
 from config import PUBLIC_KEY, JWT_ISSUER, JWT_AUDIENCE
 

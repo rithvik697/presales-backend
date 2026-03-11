@@ -32,7 +32,12 @@ class AuthService:
                     password_hash,
                     emp_status,
                     role_id,
-                    last_login
+                    last_login,
+                    CONCAT(
+                        emp_first_name,
+                        COALESCE(CONCAT(' ', emp_middle_name), ''),
+                        COALESCE(CONCAT(' ', emp_last_name), '')
+                    ) AS full_name
                 FROM employee
                 WHERE username = %s AND email = %s
             """, (username.lower(), email.lower()))
@@ -68,6 +73,7 @@ class AuthService:
             return {
                 "user_id": user["user_id"],
                 "username": user["username"],
+                "full_name": user["full_name"],
                 "role_type": user["role_id"]
             }
 
@@ -165,6 +171,46 @@ class AuthService:
         except Exception as e:
             logger.error(f"Reset password error: {e}")
             raise e
+
+        finally:
+            cursor.close()
+            db.close()
+            
+    def change_password(self, user_id, old_password, new_password):
+
+        db = get_db()
+        cursor = db.cursor(dictionary=True)
+
+        try:
+            cursor.execute(
+                "SELECT password_hash FROM employee WHERE emp_id = %s",
+                (user_id,)
+            )
+
+            user = cursor.fetchone()
+
+            if not user:
+                return False
+
+            # verify old password
+            if not check_password_hash(user["password_hash"], old_password):
+                return False
+
+            # hash new password
+            new_hash = generate_password_hash(new_password, method="scrypt")
+
+            cursor.execute(
+                "UPDATE employee SET password_hash = %s WHERE emp_id = %s",
+                (new_hash, user_id)
+            )
+
+            db.commit()
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Change password error: {e}")
+            return False
 
         finally:
             cursor.close()
