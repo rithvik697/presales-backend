@@ -101,6 +101,9 @@ def create_history(lead_id, data, emp_id):
         new_status_id = data.get('new_status_id')
         remarks = data.get('remarks', '')   # <-- DEFINE IT HERE
 
+        if old_status_id == new_status_id:
+            old_status_id = None
+            
         # Insert history row
         cursor.execute("""
             INSERT INTO lead_status_history

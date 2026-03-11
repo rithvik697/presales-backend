@@ -79,3 +79,43 @@ class AuthService:
         finally:
             cursor.close()
             db.close()
+    
+    def change_password(self, user_id, old_password, new_password):
+
+        db = get_db()
+        cursor = db.cursor(dictionary=True)
+
+        try:
+            cursor.execute(
+                "SELECT password_hash FROM employee WHERE emp_id = %s",
+                (user_id,)
+            )
+
+            user = cursor.fetchone()
+
+            if not user:
+                return False
+
+            # verify old password
+            if not check_password_hash(user["password_hash"], old_password):
+                return False
+
+            # hash new password
+            new_hash = generate_password_hash(new_password, method="scrypt")
+
+            cursor.execute(
+                "UPDATE employee SET password_hash = %s WHERE emp_id = %s",
+                (new_hash, user_id)
+            )
+
+            db.commit()
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Change password error: {e}")
+            return False
+
+        finally:
+            cursor.close()
+            db.close()

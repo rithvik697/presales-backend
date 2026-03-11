@@ -528,7 +528,7 @@ def fetch_all_statuses():
         cursor.execute("""
             SELECT status_id, status_name
             FROM lead_status
-            ORDER BY status_name ASC
+            ORDER BY pipeline_order ASC
         """)
         return cursor.fetchall()
     except Exception as e:
