@@ -9,6 +9,7 @@ from controllers.auth_controller import auth_controller_bp
 from controllers.leads_controller import leads_bp
 from controllers.lead_status_history_controller import lead_status_history_bp
 from controllers.audit_controller import audit_controller_bp
+from controllers.reports_controller import reports_bp
 
 app = Flask(__name__)
 CORS(app)
@@ -21,6 +22,7 @@ app.register_blueprint(user_controller_bp, url_prefix="/api")
 app.register_blueprint(leads_bp, url_prefix="/api/leads")
 app.register_blueprint(lead_status_history_bp, url_prefix='/api')
 app.register_blueprint(audit_controller_bp, url_prefix="/api")
+app.register_blueprint(reports_bp, url_prefix="/api/reports")
 
 
 

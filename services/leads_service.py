@@ -111,8 +111,8 @@ def _get_or_create_customer(cursor, data, actor_id=None):
             phone_num, alt_num, email, profession,
             created_on, created_by, modified_on, modified_by, is_active)
            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s, NULL, NULL, 1)""",
-        (customer_id, first_name, last_name, phone,
-         data.get('alternate_phone'), data.get('email'),
+        (customer_id, first_name, last_name, clean_phone,
+         ''.join(filter(str.isdigit, data.get('alternate_phone', ''))) if data.get('alternate_phone') else None, data.get('email'),
          data.get('profession'), actor_id)
     )
     return customer_id
@@ -428,7 +428,7 @@ def update_existing_lead(lead_id, data, actor_id=None):
                        modified_by         = %s
                    WHERE customer_id = %s""",
                 (first, last, data.get('email'),
-                 data.get('alternate_phone'), data.get('profession'),
+                 ''.join(filter(str.isdigit, data.get('alternate_phone', ''))) if data.get('alternate_phone') else None, data.get('profession'),
                  actor_id, cust_id)
             )
 
