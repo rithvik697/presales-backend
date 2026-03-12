@@ -8,8 +8,8 @@ DB_CONFIG = {
     "host": "localhost",
     "port" : 3306,
     "user": "root",
-    "password": "Kana@123",
-    "database": "presales"
+    "password": "Root@1234",
+    "database": "presales_crm_3"
 }
 
 # ----------------------------------------
