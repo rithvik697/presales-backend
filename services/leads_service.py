@@ -13,25 +13,23 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------
 
 def _generate_id(cursor, table, id_col, prefix):
-    """Generates a sequential ID (e.g., L001, L002)."""
-    pattern = f"^{prefix}[0-9]+$"
-    query = (
-        f"SELECT {id_col} FROM {table} "
-        f"WHERE {id_col} REGEXP %s "
-        f"ORDER BY LENGTH({id_col}) DESC, {id_col} DESC LIMIT 1"
-    )
-    cursor.execute(query, (pattern,))
+    """
+    Production-safe sequential ID generator.
+    Generates IDs like:
+    L001, L002, L003 ... L100000+
+    """
+
+    query = f"""
+        SELECT MAX(CAST(SUBSTRING({id_col}, {len(prefix)+1}) AS UNSIGNED))
+        FROM {table}
+        WHERE {id_col} LIKE %s
+    """
+
+    cursor.execute(query, (f"{prefix}%",))
     result = cursor.fetchone()
 
-    if result:
-        last_id = result[0]
-        try:
-            number_part = int(last_id[len(prefix):])
-            new_number = number_part + 1
-        except ValueError:
-            new_number = 1
-    else:
-        new_number = 1
+    last_number = result[0] if result and result[0] else 0
+    new_number = last_number + 1
 
     return f"{prefix}{str(new_number).zfill(3)}"
 

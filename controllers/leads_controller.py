@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from services import leads_service
-from utils.token_helper import get_emp_id_from_token
+from utils.token_helper import get_emp_id_from_token,get_emp_role_from_token
 
 leads_bp = Blueprint('leads', __name__)
 
@@ -117,6 +117,7 @@ def update_lead(lead_id):
         data = request.json
 
         actor_id = get_emp_id_from_token()
+        role = get_emp_role_from_token()
         if not actor_id:
             return jsonify({'error': 'Unauthorized: valid token required'}), 401
 
@@ -132,7 +133,15 @@ def update_lead(lead_id):
             'profession':      data.get('profession'),
         }
 
-        success = leads_service.update_existing_lead(lead_id, update_data, actor_id=actor_id)
+        # Restrict fields for non-admins
+        if role != "ADMIN":
+            update_data.pop("source", None)
+            update_data.pop("assigned_to", None)
+            
+        success = leads_service.update_existing_lead(
+            lead_id, update_data, actor_id=actor_id
+        )
+
         if success:
             return jsonify({'message': 'Lead updated successfully'}), 200
         else:

@@ -44,3 +44,40 @@ def get_emp_id_from_token():
     except jwt.InvalidTokenError as e:
         logger.warning(f"Invalid JWT token: {e}")
         return None
+
+def get_emp_role_from_token():
+    """
+    Extracts the user's role from the JWT token.
+    Returns:
+        str: Role of the user (e.g. 'Admin', 'Sales Exec') or None if invalid.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        logger.warning("Missing or malformed Authorization header")
+        return None
+
+    token = auth_header.split(" ", 1)[1]
+
+    try:
+        decode_kwargs = {
+            "algorithms": ["RS256"],
+        }
+
+        if JWT_ISSUER:
+            decode_kwargs["issuer"] = JWT_ISSUER
+        if JWT_AUDIENCE:
+            decode_kwargs["audience"] = JWT_AUDIENCE
+
+        payload = jwt.decode(token, PUBLIC_KEY, **decode_kwargs)
+
+        role = payload.get("role")   # 👈 This must exist in your JWT
+        logger.info(f"Token role extracted: {role}")
+
+        return role
+
+    except jwt.ExpiredSignatureError:
+        logger.warning("JWT token expired")
+        return None
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Invalid JWT token: {e}")
+        return None
