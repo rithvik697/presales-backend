@@ -70,7 +70,7 @@ def get_emp_role_from_token():
 
         payload = jwt.decode(token, PUBLIC_KEY, **decode_kwargs)
 
-        role = payload.get("role")   # 👈 This must exist in your JWT
+        role = payload.get("role_type")   # 👈 This must exist in your JWT
         logger.info(f"Token role extracted: {role}")
 
         return role
