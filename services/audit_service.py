@@ -76,7 +76,7 @@ def get_audit_logs():
                     ELSE a.new_value
                 END AS new_value,
 
-                e.username AS modified_by,
+                COALESCE(e.username, a.modified_by) AS modified_by,
                 a.modified_on,
                 a.action_type
 

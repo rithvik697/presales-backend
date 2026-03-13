@@ -1,6 +1,7 @@
 from services.lead_status_history_service import create_history
 from db import get_db
 from services.audit_service import log_audit
+from services.notification_service import create_notification
 
 import logging
 
@@ -348,6 +349,14 @@ def add_new_lead(data, actor_id=None):
 
         conn.commit()
 
+        create_notification(
+            emp_id,
+            "New Lead Assigned",
+            f"Lead {new_lead_id} has been assigned to you",
+            "Leads",
+            new_lead_id
+        )
+
         # --------------------------------------------------
         # AUDIT TRAIL : LEAD CREATION
         # --------------------------------------------------
@@ -463,6 +472,7 @@ def update_existing_lead(lead_id, data, actor_id=None):
             )
 
         if emp_id and emp_id != old_data["emp_id"]:
+
             log_audit(
                 "Leads",
                 lead_id,
@@ -471,6 +481,15 @@ def update_existing_lead(lead_id, data, actor_id=None):
                 emp_id,
                 actor_id,
                 "UPDATE"
+            )
+            
+            # 🔔 Notify the new assigned employee
+            create_notification(
+                emp_id,
+                "Lead Reassigned",
+                f"Lead {lead_id} has been assigned to you",
+                "Leads",
+                lead_id
             )
 
         if project_id and project_id != old_data["project_id"]:
