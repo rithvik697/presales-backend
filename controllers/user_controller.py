@@ -9,6 +9,7 @@ from services.user_service import (
 )
 from decorators.auth_decorators import token_required
 
+
 user_controller_bp = Blueprint(
     'user_controller_bp',
     __name__,
@@ -22,6 +23,7 @@ user_controller_bp = Blueprint(
 @user_controller_bp.route('/users/register', methods=['POST'])
 @token_required
 def create_user(decoded):
+
     data = request.json
 
     if not data:
@@ -32,7 +34,11 @@ def create_user(decoded):
 
     try:
         current_user = decoded.get('username', 'ADMIN')
-        user_data = register_user(data, created_by=current_user)
+
+        user_data = register_user(
+            data,
+            created_by=current_user
+        )
 
         return jsonify({
             "success": True,
@@ -59,12 +65,15 @@ def create_user(decoded):
 @user_controller_bp.route('/users', methods=['GET'])
 @token_required
 def fetch_users(decoded):
+
     try:
         users = get_all_users()
+
         return jsonify({
             "success": True,
             "data": users
         }), 200
+
     except Exception as e:
         return jsonify({
             "success": False,
@@ -78,6 +87,7 @@ def fetch_users(decoded):
 @user_controller_bp.route('/users/<emp_id>', methods=['GET'])
 @token_required
 def fetch_user_by_id_controller(decoded, emp_id):
+
     try:
         user = get_user_by_id(emp_id)
 
@@ -105,6 +115,7 @@ def fetch_user_by_id_controller(decoded, emp_id):
 @user_controller_bp.route('/users/<emp_id>', methods=['PUT'])
 @token_required
 def update_user_controller(decoded, emp_id):
+
     data = request.json
 
     if not data:
@@ -115,7 +126,12 @@ def update_user_controller(decoded, emp_id):
 
     try:
         current_user = decoded.get('username', 'ADMIN')
-        updated = update_user(emp_id, data, modified_by=current_user)
+
+        updated = update_user(
+            emp_id,
+            data,
+            modified_by=current_user
+        )
 
         if not updated:
             return jsonify({
@@ -147,6 +163,7 @@ def update_user_controller(decoded, emp_id):
 @user_controller_bp.route('/users/<emp_id>/status', methods=['PUT'])
 @token_required
 def update_user_status_controller(decoded, emp_id):
+
     data = request.json
 
     if not data:
@@ -166,7 +183,12 @@ def update_user_status_controller(decoded, emp_id):
 
     try:
         current_user = decoded.get('username', 'ADMIN')
-        updated = update_user_status(emp_id, new_status, modified_by=current_user)
+
+        updated = update_user_status(
+            emp_id,
+            new_status,
+            modified_by=current_user
+        )
 
         if not updated:
             return jsonify({
@@ -192,9 +214,14 @@ def update_user_status_controller(decoded, emp_id):
 @user_controller_bp.route('/users/<emp_id>', methods=['DELETE'])
 @token_required
 def delete_user(decoded, emp_id):
+
     try:
         current_user = decoded.get('username', 'ADMIN')
-        deleted = delete_user_by_id(emp_id, modified_by=current_user)
+
+        deleted = delete_user_by_id(
+            emp_id,
+            modified_by=current_user
+        )
 
         if not deleted:
             return jsonify({
