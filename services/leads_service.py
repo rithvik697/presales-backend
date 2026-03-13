@@ -358,13 +358,51 @@ def add_new_lead(data, actor_id=None, role=None):
 
         conn.commit()
 
+        # --------------------------------------------------
+        # Fetch creator name for notification messages
+        # --------------------------------------------------
+        cursor.execute("""
+            SELECT CONCAT(emp_first_name,' ',IFNULL(emp_last_name,'')) 
+            FROM employee 
+            WHERE emp_id = %s
+        """, (actor_id,))
+
+        creator_name = cursor.fetchone()[0]
+
+
         create_notification(
             emp_id,
             "New Lead Assigned",
-            f"Lead {new_lead_id} has been assigned to you",
+            f"Lead {new_lead_id} has been assigned to you by {creator_name}",
             "Leads",
             new_lead_id
         )
+
+        # --------------------------------------------------
+        # Notify ADMIN users that a lead was created
+        # (Exclude the creator if they are also an admin)
+        # --------------------------------------------------
+
+        cursor.execute("""
+            SELECT emp_id
+            FROM employee
+            WHERE role_id = 'ADMIN'
+            AND emp_status = 'Active'
+            AND emp_id != %s
+        """, (actor_id,))
+
+        admins = cursor.fetchall()
+
+        for admin in admins:
+
+            create_notification(
+                admin[0],
+                "New Lead Created",
+                f"Lead {new_lead_id} was created by {creator_name}",
+                "Leads",
+                new_lead_id
+            )
+
 
         # --------------------------------------------------
         # AUDIT TRAIL : LEAD CREATION
@@ -425,7 +463,7 @@ def update_existing_lead(lead_id, data, actor_id=None):
         # --- Extract IDs from request ---
         source_id   = data.get('source')       # Now expects source_id (e.g., 'SRC001')
         status_id   = data.get('status')       # Now expects status_id (e.g., 'ST001')
-        emp_id      = data.get('assigned_to')  # Now expects emp_id   (e.g., 'EMP003')
+        emp_id = data.get('assigned_to') or data.get('assignedToId') or data.get('assignedTo')  # Now expects emp_id   (e.g., 'EMP003')
         project_id  = data.get('project')      # Already expects project_id
         description = data.get('description', '')
 
@@ -453,6 +491,8 @@ def update_existing_lead(lead_id, data, actor_id=None):
             (source_id, status_id, emp_id, project_id,
              description, actor_id, lead_id)
         )
+        
+        print("NEW ASSIGNED EMPLOYEE:", emp_id)
 
         # --------------------------------------------------
         # AUDIT TRAIL : FIELD CHANGE DETECTION
@@ -491,15 +531,35 @@ def update_existing_lead(lead_id, data, actor_id=None):
                 actor_id,
                 "UPDATE"
             )
-            
-            # 🔔 Notify the new assigned employee
+
+            # --------------------------------------------------
+            # Fetch name of the person who assigned the lead
+            # --------------------------------------------------
+
+            cursor.execute("""
+                SELECT CONCAT(emp_first_name,' ',IFNULL(emp_last_name,''))
+                FROM employee
+                WHERE emp_id = %s
+            """, (actor_id,))
+
+            assigner = cursor.fetchone()
+
+            assigner_name = assigner[0] if assigner else "Admin"
+
+            # --------------------------------------------------
+            # Send notification to newly assigned employee
+            # --------------------------------------------------
+
             create_notification(
                 emp_id,
                 "Lead Reassigned",
-                f"Lead {lead_id} has been assigned to you",
+                f"Lead {lead_id} has been assigned to you by {assigner_name}",
                 "Leads",
                 lead_id
             )
+
+
+
 
         if project_id and project_id != old_data["project_id"]:
             log_audit(
