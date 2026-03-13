@@ -11,7 +11,7 @@ from db import get_db
 
 
 def get_history_by_lead(lead_id):
-    """Fetch full status change history for a lead, newest first."""
+    """Fetch status and reassignment history for a lead, newest first."""
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
     try:
@@ -19,8 +19,11 @@ def get_history_by_lead(lead_id):
             SELECT
                 h.history_id,
                 h.lead_id,
+                'status_change' AS event_type,
                 h.old_status_id,
                 h.new_status_id,
+                NULL AS old_assigned_to,
+                NULL AS new_assigned_to,
                 h.remarks,
                 h.changed_by,
                 h.changed_at,
@@ -34,12 +37,48 @@ def get_history_by_lead(lead_id):
             WHERE h.lead_id = %s
             ORDER BY h.changed_at DESC
         """, (lead_id,))
-        rows = cursor.fetchall()
+        status_rows = cursor.fetchall()
+
+        cursor.execute("""
+            SELECT
+                a.audit_id AS history_id,
+                a.object_id AS lead_id,
+                'assignment_change' AS event_type,
+                NULL AS old_status_id,
+                NULL AS new_status_id,
+                CONCAT(emp_old.emp_first_name, ' ', COALESCE(emp_old.emp_last_name, '')) AS old_assigned_to,
+                CONCAT(emp_new.emp_first_name, ' ', COALESCE(emp_new.emp_last_name, '')) AS new_assigned_to,
+                NULL AS remarks,
+                a.modified_by AS changed_by,
+                a.modified_on AS changed_at,
+                NULL AS old_status_name,
+                NULL AS new_status_name,
+                CONCAT(e.emp_first_name, ' ', COALESCE(e.emp_last_name, '')) AS changed_by_name
+            FROM audit_trail a
+            LEFT JOIN employee emp_old ON a.old_value = emp_old.emp_id
+            LEFT JOIN employee emp_new ON a.new_value = emp_new.emp_id
+            LEFT JOIN employee e ON a.modified_by = e.emp_id
+            WHERE a.object_name = 'Leads'
+              AND a.object_id = %s
+              AND a.property_name = 'emp_id'
+              AND a.action_type = 'UPDATE'
+            ORDER BY a.modified_on DESC
+        """, (lead_id,))
+        assignment_rows = cursor.fetchall()
+
+        rows = status_rows + assignment_rows
 
         for row in rows:
             if row.get('changed_at'):
                 row['changed_at'] = row['changed_at'].isoformat()
+            if row.get('old_assigned_to'):
+                row['old_assigned_to'] = row['old_assigned_to'].strip()
+            if row.get('new_assigned_to'):
+                row['new_assigned_to'] = row['new_assigned_to'].strip()
+            if row.get('changed_by_name'):
+                row['changed_by_name'] = row['changed_by_name'].strip()
 
+        rows.sort(key=lambda row: row.get('changed_at') or '', reverse=True)
         return rows
     finally:
         cursor.close()

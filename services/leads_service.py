@@ -125,7 +125,7 @@ def _get_or_create_customer(cursor, data, actor_id=None):
 # SERVICE FUNCTIONS (Public API)
 # ---------------------------------------------------------
 
-def fetch_all_leads(filters=None):
+def fetch_all_leads(filters=None, actor_id=None, role=None):
     """
     Fetches leads with JOINs.
     Returns BOTH IDs and names for foreign keys so the frontend
@@ -198,6 +198,14 @@ def fetch_all_leads(filters=None):
             if filters.get('project'):
                 query += " AND pr.project_name = %s"
                 params.append(filters['project'])
+        
+        # --------------------------------------------------
+        # LEAD VISIBILITY CONTROL
+        # --------------------------------------------------
+
+        if not role or role.upper() != "ADMIN":
+            query += " AND l.emp_id = %s"
+            params.append(actor_id)
 
         query += " ORDER BY l.created_on DESC"
         cursor.execute(query, tuple(params))
@@ -278,7 +286,7 @@ def fetch_lead_by_id(lead_id):
     return None
 
 
-def add_new_lead(data, actor_id=None):
+def add_new_lead(data, actor_id=None, role=None):
     """
     Creates a new lead.
     Expects IDs for: source, status, assigned_to, project.
@@ -304,6 +312,9 @@ def add_new_lead(data, actor_id=None):
         emp_id      = data.get('assigned_to')
         project_id  = data.get('project')
         description = data.get('description', '')
+
+        if role and role.upper() == "SALES_EXEC":
+            emp_id = actor_id
 
         # --- Validate required fields ---
         if not source_id:
@@ -507,6 +518,19 @@ def update_existing_lead(lead_id, data, actor_id=None):
                 status_id,
                 actor_id,
                 "UPDATE"
+            )
+
+            cursor.execute(
+                """INSERT INTO lead_status_history
+                   (lead_id, old_status_id, new_status_id, remarks, changed_by)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (
+                    lead_id,
+                    old_data["status_id"],
+                    status_id,
+                    '',
+                    actor_id
+                )
             )
 
         if emp_id and emp_id != old_data["emp_id"]:
