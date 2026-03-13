@@ -1,5 +1,7 @@
 from services.lead_status_history_service import create_history
 from db import get_db
+from services.audit_service import log_audit
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -52,7 +54,7 @@ def _check_duplicate_phone(cursor, phone, exclude_lead_id=None):
     if not phone:
         return
 
-    clean_phone = phone.replace(' ', '').replace('-', '').replace('+', '')
+    clean_phone = ''.join(filter(str.isdigit, phone))[-10:]
 
     query = """
         SELECT l.lead_id, c.phone_num
@@ -86,7 +88,7 @@ def _get_or_create_customer(cursor, data, actor_id=None):
     if not phone:
         return None
 
-    clean_phone = phone.replace(' ', '').replace('-', '').replace('+', '')
+    clean_phone = ''.join(filter(str.isdigit, phone))[-10:]
 
     cursor.execute(
         """SELECT customer_id FROM customer
@@ -110,8 +112,10 @@ def _get_or_create_customer(cursor, data, actor_id=None):
             created_on, created_by, modified_on, modified_by, is_active)
            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s, NULL, NULL, 1)""",
         (customer_id, first_name, last_name, clean_phone,
-         ''.join(filter(str.isdigit, data.get('alternate_phone', ''))) if data.get('alternate_phone') else None, data.get('email'),
-         data.get('profession'), actor_id)
+         ''.join(filter(str.isdigit, data.get('alternate_phone', ''))) if data.get('alternate_phone') else None,
+         data.get('email'),
+         data.get('profession'),
+         actor_id)
     )
     return customer_id
 
@@ -340,8 +344,22 @@ def add_new_lead(data, actor_id=None):
             "remarks": "Lead created"
         }
 
-
         conn.commit()
+
+        # --------------------------------------------------
+        # AUDIT TRAIL : LEAD CREATION
+        # --------------------------------------------------
+        log_audit("Leads", new_lead_id, "lead_id", None, new_lead_id, actor_id, "INSERT")
+        log_audit("Leads", new_lead_id, "source_id", None, source_id, actor_id, "INSERT")
+        log_audit("Leads", new_lead_id, "status_id", None, status_id, actor_id, "INSERT")
+        log_audit("Leads", new_lead_id, "emp_id", None, emp_id, actor_id, "INSERT")
+
+        if project_id:
+            log_audit("Leads", new_lead_id, "project_id", None, project_id, actor_id, "INSERT")
+
+        if description:
+            log_audit("Leads", new_lead_id, "lead_description", None, description, actor_id, "INSERT")
+
         logger.info(f"Lead {new_lead_id} created by {actor_id}")
         create_history(new_lead_id, initial_history, actor_id)
         return new_lead_id
@@ -357,6 +375,7 @@ def add_new_lead(data, actor_id=None):
         conn.close()
 
 
+
 def update_existing_lead(lead_id, data, actor_id=None):
     """
     Updates an existing lead.
@@ -369,6 +388,19 @@ def update_existing_lead(lead_id, data, actor_id=None):
 
     try:
         cursor = conn.cursor(dictionary=True)
+
+        # --------------------------------------------------
+        # FETCH OLD VALUES FOR AUDIT
+        # --------------------------------------------------
+        cursor.execute("""
+            SELECT source_id, status_id, emp_id, project_id, lead_description
+            FROM leads
+            WHERE lead_id = %s AND is_active = 1
+        """, (lead_id,))
+        old_data = cursor.fetchone()
+
+        if not old_data:
+            raise ValueError("Lead not found")
 
         # --- Extract IDs from request ---
         source_id   = data.get('source')       # Now expects source_id (e.g., 'SRC001')
@@ -402,6 +434,65 @@ def update_existing_lead(lead_id, data, actor_id=None):
              description, actor_id, lead_id)
         )
 
+        # --------------------------------------------------
+        # AUDIT TRAIL : FIELD CHANGE DETECTION
+        # --------------------------------------------------
+
+        if source_id and source_id != old_data["source_id"]:
+            log_audit(
+                "Leads",
+                lead_id,
+                "source_id",
+                old_data["source_id"],
+                source_id,
+                actor_id,
+                "UPDATE"
+            )
+
+        if status_id and status_id != old_data["status_id"]:
+            log_audit(
+                "Leads",
+                lead_id,
+                "status_id",
+                old_data["status_id"],
+                status_id,
+                actor_id,
+                "UPDATE"
+            )
+
+        if emp_id and emp_id != old_data["emp_id"]:
+            log_audit(
+                "Leads",
+                lead_id,
+                "emp_id",
+                old_data["emp_id"],
+                emp_id,
+                actor_id,
+                "UPDATE"
+            )
+
+        if project_id and project_id != old_data["project_id"]:
+            log_audit(
+                "Leads",
+                lead_id,
+                "project_id",
+                old_data["project_id"],
+                project_id,
+                actor_id,
+                "UPDATE"
+            )
+
+        if description != old_data["lead_description"]:
+            log_audit(
+                "Leads",
+                lead_id,
+                "lead_description",
+                old_data["lead_description"],
+                description,
+                actor_id,
+                "UPDATE"
+            )
+
         # --- Update customer details if provided ---
         cursor.execute(
             "SELECT customer_id FROM leads WHERE lead_id = %s",
@@ -425,9 +516,16 @@ def update_existing_lead(lead_id, data, actor_id=None):
                        modified_on         = NOW(),
                        modified_by         = %s
                    WHERE customer_id = %s""",
-                (first, last, data.get('email'),
-                 ''.join(filter(str.isdigit, data.get('alternate_phone', ''))) if data.get('alternate_phone') else None, data.get('profession'),
-                 actor_id, cust_id)
+                (
+                    first,
+                    last,
+                    data.get('email'),
+                    ''.join(filter(str.isdigit, data.get('alternate_phone', '')))[-10:]
+                    if data.get('alternate_phone') else None,
+                    data.get('profession'),
+                    actor_id,
+                    cust_id
+                )
             )
 
         conn.commit()
@@ -442,7 +540,8 @@ def update_existing_lead(lead_id, data, actor_id=None):
         logger.error(f"Error updating lead {lead_id}: {e}")
         return False
     finally:
-        conn.close()
+        conn.close()        
+        
 
 
 def delete_existing_lead(lead_id):
