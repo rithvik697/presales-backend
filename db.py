@@ -6,10 +6,9 @@ from mysql.connector import pooling
 # ----------------------------------------
 DB_CONFIG = {
     "host": "localhost",
-    "port" : 3306,
     "user": "root",
-    "password": "Kana@123",
-    "database": "presales"
+    "password": "Admin@99",
+    "database": "presales_crm"
 }
 
 # ----------------------------------------
