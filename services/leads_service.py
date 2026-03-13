@@ -520,6 +520,19 @@ def update_existing_lead(lead_id, data, actor_id=None):
                 "UPDATE"
             )
 
+            cursor.execute(
+                """INSERT INTO lead_status_history
+                   (lead_id, old_status_id, new_status_id, remarks, changed_by)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (
+                    lead_id,
+                    old_data["status_id"],
+                    status_id,
+                    '',
+                    actor_id
+                )
+            )
+
         if emp_id and emp_id != old_data["emp_id"]:
 
             log_audit(
