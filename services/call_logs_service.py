@@ -142,3 +142,47 @@ def get_call_logs_for_ui():
         cursor.close()
         db.close()
 
+
+def get_call_logs_for_lead_ui(lead_id):
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    try:
+        cursor.execute("""
+            SELECT
+                c.call_id AS callId,
+                DATE(c.call_time) AS callDate,
+                TIME(c.call_time) AS startTime,
+                CASE
+                    WHEN c.call_duration IS NULL THEN NULL
+                    ELSE ADDTIME(TIME(c.call_time), SEC_TO_TIME(c.call_duration))
+                END AS endTime,
+                CASE
+                    WHEN c.call_duration IS NULL THEN '-'
+                    ELSE CONCAT(
+                        FLOOR(c.call_duration / 60), ' min ',
+                        MOD(c.call_duration, 60), ' sec'
+                    )
+                END AS duration,
+                c.call_status AS callStatus,
+                c.call_source AS callSource,
+                c.call_time AS callTime,
+                CONCAT_WS(' ',
+                    e.emp_first_name,
+                    e.emp_middle_name,
+                    e.emp_last_name
+                ) AS madeBy,
+                l.lead_description AS remarks
+            FROM call_log c
+            LEFT JOIN employee e ON c.emp_id = e.emp_id
+            LEFT JOIN leads l ON c.lead_id = l.lead_id
+            WHERE c.lead_id = %s
+            ORDER BY c.call_time DESC
+        """, (lead_id,))
+
+        return cursor.fetchall()
+
+    finally:
+        cursor.close()
+        db.close()
+

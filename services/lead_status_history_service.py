@@ -9,10 +9,12 @@ Table: lead_status_history
 from db import get_db
 from services.audit_service import log_audit
 from services.notification_service import create_notification
+from services.followup_calls_service import get_scheduled_activities_by_lead
+from services.lead_comments_service import get_comments_by_lead
 
 
 def get_history_by_lead(lead_id):
-    """Fetch status and reassignment history for a lead, newest first."""
+    """Fetch status, reassignment, scheduled-activity, and comment history for a lead."""
 
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
@@ -71,11 +73,52 @@ def get_history_by_lead(lead_id):
 
         assignment_rows = cursor.fetchall()
 
-        rows = status_rows + assignment_rows
+        scheduled_rows = []
+        for activity in get_scheduled_activities_by_lead(lead_id):
+            scheduled_rows.append({
+                'history_id': activity['schedule_id'],
+                'lead_id': activity['lead_id'],
+                'event_type': 'scheduled_activity',
+                'old_status_id': None,
+                'new_status_id': None,
+                'old_assigned_to': None,
+                'new_assigned_to': None,
+                'remarks': activity.get('remarks'),
+                'changed_by': activity['created_by'],
+                'changed_by_name': activity.get('created_by_name'),
+                'changed_at': activity['created_on'],
+                'old_status_name': None,
+                'new_status_name': None,
+                'scheduled_at': activity['scheduled_at'],
+                'schedule_status': activity.get('status', 'SCHEDULED'),
+                'scheduled_status_id': activity['status_id'],
+                'scheduled_status_name': activity.get('status_name')
+            })
+
+        comment_rows = []
+        for comment in get_comments_by_lead(lead_id):
+            comment_rows.append({
+                'history_id': comment['comment_id'],
+                'lead_id': comment['lead_id'],
+                'event_type': 'comment',
+                'old_status_id': None,
+                'new_status_id': None,
+                'old_assigned_to': None,
+                'new_assigned_to': None,
+                'remarks': comment['comment_text'],
+                'changed_by': comment['created_by'],
+                'changed_by_name': comment.get('created_by_name'),
+                'changed_at': comment['created_on'],
+                'old_status_name': None,
+                'new_status_name': None
+            })
+
+        rows = status_rows + assignment_rows + scheduled_rows + comment_rows
 
         for row in rows:
             if row.get('changed_at'):
-                row['changed_at'] = row['changed_at'].isoformat()
+                changed_at = row['changed_at']
+                row['changed_at'] = changed_at.isoformat() if hasattr(changed_at, 'isoformat') else changed_at
 
         rows.sort(key=lambda r: r.get('changed_at') or '', reverse=True)
 

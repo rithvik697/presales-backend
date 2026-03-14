@@ -112,8 +112,8 @@ def _get_or_create_customer(cursor, data, actor_id=None):
             phone_num, alt_num, email, profession,
             created_on, created_by, modified_on, modified_by, is_active)
            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s, NULL, NULL, 1)""",
-        (customer_id, first_name, last_name, clean_phone,
-         ''.join(filter(str.isdigit, data.get('alternate_phone', ''))) if data.get('alternate_phone') else None,
+        (customer_id, first_name, last_name, phone,
+         data.get('alternate_phone'),
          data.get('email'),
          data.get('profession'),
          actor_id)
@@ -353,7 +353,7 @@ def add_new_lead(data, actor_id=None, role=None):
 
         initial_history = {
             "new_status_id": status_id,
-            "remarks": "Lead created"
+            "remarks": description or "Lead created"
         }
 
         conn.commit()
