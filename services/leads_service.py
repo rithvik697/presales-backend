@@ -809,3 +809,4 @@ def fetch_all_statuses():
         return []
     finally:
         conn.close()
+        
