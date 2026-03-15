@@ -1,5 +1,8 @@
 from services.lead_status_history_service import create_history
 from db import get_db
+from services.audit_service import log_audit
+from services.notification_service import create_notification
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -10,25 +13,23 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------
 
 def _generate_id(cursor, table, id_col, prefix):
-    """Generates a sequential ID (e.g., L001, L002)."""
-    pattern = f"^{prefix}[0-9]+$"
-    query = (
-        f"SELECT {id_col} FROM {table} "
-        f"WHERE {id_col} REGEXP %s "
-        f"ORDER BY LENGTH({id_col}) DESC, {id_col} DESC LIMIT 1"
-    )
-    cursor.execute(query, (pattern,))
+    """
+    Production-safe sequential ID generator.
+    Generates IDs like:
+    L001, L002, L003 ... L100000+
+    """
+
+    query = f"""
+        SELECT MAX(CAST(SUBSTRING({id_col}, {len(prefix)+1}) AS UNSIGNED))
+        FROM {table}
+        WHERE {id_col} LIKE %s
+    """
+
+    cursor.execute(query, (f"{prefix}%",))
     result = cursor.fetchone()
 
-    if result:
-        last_id = result[0]
-        try:
-            number_part = int(last_id[len(prefix):])
-            new_number = number_part + 1
-        except ValueError:
-            new_number = 1
-    else:
-        new_number = 1
+    last_number = result[0] if result and result[0] else 0
+    new_number = last_number + 1
 
     return f"{prefix}{str(new_number).zfill(3)}"
 
@@ -54,7 +55,7 @@ def _check_duplicate_phone(cursor, phone, exclude_lead_id=None):
     if not phone:
         return
 
-    clean_phone = phone.replace(' ', '').replace('-', '').replace('+', '')
+    clean_phone = ''.join(filter(str.isdigit, phone))[-10:]
 
     query = """
         SELECT l.lead_id, c.phone_num
@@ -88,7 +89,7 @@ def _get_or_create_customer(cursor, data, actor_id=None):
     if not phone:
         return None
 
-    clean_phone = phone.replace(' ', '').replace('-', '').replace('+', '')
+    clean_phone = ''.join(filter(str.isdigit, phone))[-10:]
 
     cursor.execute(
         """SELECT customer_id FROM customer
@@ -111,9 +112,11 @@ def _get_or_create_customer(cursor, data, actor_id=None):
             phone_num, alt_num, email, profession,
             created_on, created_by, modified_on, modified_by, is_active)
            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s, NULL, NULL, 1)""",
-        (customer_id, first_name, last_name, clean_phone,
-         ''.join(filter(str.isdigit, data.get('alternate_phone', ''))) if data.get('alternate_phone') else None, data.get('email'),
-         data.get('profession'), actor_id)
+        (customer_id, first_name, last_name, phone,
+         data.get('alternate_phone'),
+         data.get('email'),
+         data.get('profession'),
+         actor_id)
     )
     return customer_id
 
@@ -122,7 +125,7 @@ def _get_or_create_customer(cursor, data, actor_id=None):
 # SERVICE FUNCTIONS (Public API)
 # ---------------------------------------------------------
 
-def fetch_all_leads(filters=None):
+def fetch_all_leads(filters=None, actor_id=None, role=None):
     """
     Fetches leads with JOINs.
     Returns BOTH IDs and names for foreign keys so the frontend
@@ -195,6 +198,14 @@ def fetch_all_leads(filters=None):
             if filters.get('project'):
                 query += " AND pr.project_name = %s"
                 params.append(filters['project'])
+        
+        # --------------------------------------------------
+        # LEAD VISIBILITY CONTROL
+        # --------------------------------------------------
+
+        if not role or role.upper() != "ADMIN":
+            query += " AND l.emp_id = %s"
+            params.append(actor_id)
 
         query += " ORDER BY l.created_on DESC"
         cursor.execute(query, tuple(params))
@@ -275,7 +286,7 @@ def fetch_lead_by_id(lead_id):
     return None
 
 
-def add_new_lead(data, actor_id=None):
+def add_new_lead(data, actor_id=None, role=None):
     """
     Creates a new lead.
     Expects IDs for: source, status, assigned_to, project.
@@ -301,6 +312,9 @@ def add_new_lead(data, actor_id=None):
         emp_id      = data.get('assigned_to')
         project_id  = data.get('project')
         description = data.get('description', '')
+
+        if role and role.upper() == "SALES_EXEC":
+            emp_id = actor_id
 
         # --- Validate required fields ---
         if not source_id:
@@ -339,11 +353,71 @@ def add_new_lead(data, actor_id=None):
 
         initial_history = {
             "new_status_id": status_id,
-            "remarks": "Lead created"
+            "remarks": description or "Lead created"
         }
 
-
         conn.commit()
+
+        # --------------------------------------------------
+        # Fetch creator name for notification messages
+        # --------------------------------------------------
+        cursor.execute("""
+            SELECT CONCAT(emp_first_name,' ',IFNULL(emp_last_name,'')) 
+            FROM employee 
+            WHERE emp_id = %s
+        """, (actor_id,))
+
+        creator_name = cursor.fetchone()[0]
+
+
+        create_notification(
+            emp_id,
+            "New Lead Assigned",
+            f"Lead {new_lead_id} has been assigned to you by {creator_name}",
+            "Leads",
+            new_lead_id
+        )
+
+        # --------------------------------------------------
+        # Notify ADMIN users that a lead was created
+        # (Exclude the creator if they are also an admin)
+        # --------------------------------------------------
+
+        cursor.execute("""
+            SELECT emp_id
+            FROM employee
+            WHERE role_id = 'ADMIN'
+            AND emp_status = 'Active'
+            AND emp_id != %s
+        """, (actor_id,))
+
+        admins = cursor.fetchall()
+
+        for admin in admins:
+
+            create_notification(
+                admin[0],
+                "New Lead Created",
+                f"Lead {new_lead_id} was created by {creator_name}",
+                "Leads",
+                new_lead_id
+            )
+
+
+        # --------------------------------------------------
+        # AUDIT TRAIL : LEAD CREATION
+        # --------------------------------------------------
+        log_audit("Leads", new_lead_id, "lead_id", None, new_lead_id, actor_id, "INSERT")
+        log_audit("Leads", new_lead_id, "source_id", None, source_id, actor_id, "INSERT")
+        log_audit("Leads", new_lead_id, "status_id", None, status_id, actor_id, "INSERT")
+        log_audit("Leads", new_lead_id, "emp_id", None, emp_id, actor_id, "INSERT")
+
+        if project_id:
+            log_audit("Leads", new_lead_id, "project_id", None, project_id, actor_id, "INSERT")
+
+        if description:
+            log_audit("Leads", new_lead_id, "lead_description", None, description, actor_id, "INSERT")
+
         logger.info(f"Lead {new_lead_id} created by {actor_id}")
         create_history(new_lead_id, initial_history, actor_id)
         return new_lead_id
@@ -359,12 +433,13 @@ def add_new_lead(data, actor_id=None):
         conn.close()
 
 
+
 def update_existing_lead(lead_id, data, actor_id=None):
     """
     Updates an existing lead.
-    NOW ACCEPTS IDs (not names) — consistent with create.
-    Validates all foreign keys before updating.
+    Validates foreign keys and logs audit trail + notifications.
     """
+
     conn = get_db()
     if not conn:
         return False
@@ -372,77 +447,275 @@ def update_existing_lead(lead_id, data, actor_id=None):
     try:
         cursor = conn.cursor(dictionary=True)
 
-        # --- Extract IDs from request ---
-        source_id   = data.get('source')       # Now expects source_id (e.g., 'SRC001')
-        status_id   = data.get('status')       # Now expects status_id (e.g., 'ST001')
-        emp_id      = data.get('assigned_to')  # Now expects emp_id   (e.g., 'EMP003')
-        project_id  = data.get('project')      # Already expects project_id
+        # --------------------------------------------------
+        # FETCH OLD VALUES
+        # --------------------------------------------------
+
+        cursor.execute("""
+            SELECT source_id, status_id, emp_id, project_id, lead_description
+            FROM leads
+            WHERE lead_id = %s AND is_active = 1
+        """, (lead_id,))
+
+        old_data = cursor.fetchone()
+
+        if not old_data:
+            raise ValueError("Lead not found")
+
+        # --------------------------------------------------
+        # EXTRACT NEW VALUES
+        # --------------------------------------------------
+
+        source_id = data.get('source')
+        status_id = data.get('status')
+        emp_id = data.get('assigned_to') or data.get('assignedToId') or data.get('assignedTo')
+        project_id = data.get('project')
         description = data.get('description', '')
 
-        # --- Validate foreign keys if provided ---
+        # --------------------------------------------------
+        # VALIDATE FOREIGN KEYS
+        # --------------------------------------------------
+
         if source_id:
             _validate_foreign_key(cursor, 'lead_sources', 'source_id', source_id, 'source')
+
         if status_id:
             _validate_foreign_key(cursor, 'lead_status', 'status_id', status_id, 'status')
+
         if emp_id:
             _validate_foreign_key(cursor, 'employee', 'emp_id', emp_id, 'employee')
+
         if project_id:
             _validate_foreign_key(cursor, 'project_registration', 'project_id', project_id, 'project')
 
-        # --- Update the lead ---
-        cursor.execute(
-            """UPDATE leads
-               SET source_id       = IFNULL(%s, source_id),
-                   status_id       = IFNULL(%s, status_id),
-                   emp_id          = IFNULL(%s, emp_id),
-                   project_id      = IFNULL(%s, project_id),
-                   lead_description = %s,
-                   modified_on     = NOW(),
-                   modified_by     = %s
-               WHERE lead_id = %s AND is_active = 1""",
-            (source_id, status_id, emp_id, project_id,
-             description, actor_id, lead_id)
-        )
+        # --------------------------------------------------
+        # UPDATE LEAD
+        # --------------------------------------------------
 
-        # --- Update customer details if provided ---
+        cursor.execute("""
+            UPDATE leads
+            SET source_id = IFNULL(%s, source_id),
+                status_id = IFNULL(%s, status_id),
+                emp_id = IFNULL(%s, emp_id),
+                project_id = IFNULL(%s, project_id),
+                lead_description = %s,
+                modified_on = NOW(),
+                modified_by = %s
+            WHERE lead_id = %s AND is_active = 1
+        """,
+        (source_id, status_id, emp_id, project_id, description, actor_id, lead_id))
+
+        print("NEW ASSIGNED EMPLOYEE:", emp_id)
+
+        # --------------------------------------------------
+        # SOURCE CHANGE
+        # --------------------------------------------------
+
+        if source_id and source_id != old_data["source_id"]:
+            log_audit(
+                "Leads",
+                lead_id,
+                "source_id",
+                old_data["source_id"],
+                source_id,
+                actor_id,
+                "UPDATE"
+            )
+
+        # --------------------------------------------------
+        # STATUS CHANGE
+        # --------------------------------------------------
+
+        if status_id and status_id != old_data["status_id"]:
+            log_audit(
+                "Leads",
+                lead_id,
+                "status_id",
+                old_data["status_id"],
+                status_id,
+                actor_id,
+                "UPDATE"
+            )
+
+            cursor.execute("""
+                INSERT INTO lead_status_history
+                (lead_id, old_status_id, new_status_id, remarks, changed_by)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                lead_id,
+                old_data["status_id"],
+                status_id,
+                '',
+                actor_id
+            ))
+
+            # Fetch status name
+            cursor.execute("""
+                SELECT status_name
+                FROM lead_status
+                WHERE status_id = %s
+            """, (status_id,))
+
+            status_row = cursor.fetchone()
+            status_name = status_row["status_name"] if status_row else None
+
+            # Notifications for site visits
+            if status_name in ["Expected Site Visit", "Site Visit Done"]:
+
+                cursor.execute("""
+                    SELECT TRIM(CONCAT(c.customer_first_name,' ',IFNULL(c.customer_last_name,''))) AS lead_name
+                    FROM leads l
+                    JOIN customer c ON l.customer_id = c.customer_id
+                    WHERE l.lead_id = %s
+                """, (lead_id,))
+
+                lead_row = cursor.fetchone()
+                lead_name = lead_row["lead_name"] if lead_row else lead_id
+
+                if status_name == "Expected Site Visit":
+                    message = f"{lead_name} ({lead_id}) is expected to visit the site."
+
+                else:
+                    message = f"{lead_name} ({lead_id}) has completed the site visit."
+
+                cursor.execute("""
+                    SELECT emp_id
+                    FROM employee
+                    WHERE emp_status = 'Active'
+                """)
+
+                users = cursor.fetchall()
+
+                for user in users:
+                    create_notification(
+                        user["emp_id"],
+                        status_name,
+                        message,
+                        "Leads",
+                        lead_id
+                    )
+
+        # --------------------------------------------------
+        # EMPLOYEE REASSIGNMENT
+        # --------------------------------------------------
+
+        if emp_id and emp_id != old_data["emp_id"]:
+
+            log_audit(
+                "Leads",
+                lead_id,
+                "emp_id",
+                old_data["emp_id"],
+                emp_id,
+                actor_id,
+                "UPDATE"
+            )
+
+            cursor.execute("""
+                SELECT CONCAT(emp_first_name,' ',IFNULL(emp_last_name,'')) AS name
+                FROM employee
+                WHERE emp_id = %s
+            """, (actor_id,))
+
+            assigner = cursor.fetchone()
+            assigner_name = assigner["name"] if assigner else "Admin"
+
+            create_notification(
+                emp_id,
+                "Lead Reassigned",
+                f"Lead {lead_id} has been assigned to you by {assigner_name}",
+                "Leads",
+                lead_id
+            )
+
+        # --------------------------------------------------
+        # PROJECT CHANGE
+        # --------------------------------------------------
+
+        if project_id and project_id != old_data["project_id"]:
+
+            log_audit(
+                "Leads",
+                lead_id,
+                "project_id",
+                old_data["project_id"],
+                project_id,
+                actor_id,
+                "UPDATE"
+            )
+
+        # --------------------------------------------------
+        # DESCRIPTION CHANGE
+        # --------------------------------------------------
+
+        if description != old_data["lead_description"]:
+
+            log_audit(
+                "Leads",
+                lead_id,
+                "lead_description",
+                old_data["lead_description"],
+                description,
+                actor_id,
+                "UPDATE"
+            )
+
+        # --------------------------------------------------
+        # CUSTOMER UPDATE
+        # --------------------------------------------------
+
         cursor.execute(
             "SELECT customer_id FROM leads WHERE lead_id = %s",
             (lead_id,)
         )
+
         res = cursor.fetchone()
 
         if res and (data.get('name') or data.get('email')):
+
             cust_id = res['customer_id']
             names = data.get('name', '').split(' ')
+
             first = names[0] if names else ''
             last = " ".join(names[1:]) if len(names) > 1 else ""
 
-            cursor.execute(
-                """UPDATE customer
-                   SET customer_first_name = %s,
-                       customer_last_name  = %s,
-                       email               = %s,
-                       alt_num             = %s,
-                       profession          = %s,
-                       modified_on         = NOW(),
-                       modified_by         = %s
-                   WHERE customer_id = %s""",
-                (first, last, data.get('email'),
-                 ''.join(filter(str.isdigit, data.get('alternate_phone', ''))) if data.get('alternate_phone') else None, data.get('profession'),
-                 actor_id, cust_id)
-            )
+            cursor.execute("""
+                UPDATE customer
+                SET customer_first_name = %s,
+                    customer_last_name = %s,
+                    email = %s,
+                    alt_num = %s,
+                    profession = %s,
+                    modified_on = NOW(),
+                    modified_by = %s
+                WHERE customer_id = %s
+            """,
+            (
+                first,
+                last,
+                data.get('email'),
+                ''.join(filter(str.isdigit, data.get('alternate_phone', '')))[-10:]
+                if data.get('alternate_phone') else None,
+                data.get('profession'),
+                actor_id,
+                cust_id
+            ))
 
         conn.commit()
+
         logger.info(f"Lead {lead_id} updated by {actor_id}")
+
         return True
 
     except ValueError:
         conn.rollback()
         raise
+
     except Exception as e:
         conn.rollback()
         logger.error(f"Error updating lead {lead_id}: {e}")
         return False
+
     finally:
         conn.close()
 

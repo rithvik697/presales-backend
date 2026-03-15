@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from services import leads_service
-from utils.token_helper import get_emp_id_from_token
+from utils.token_helper import get_emp_id_from_token,get_emp_role_from_token
 
 leads_bp = Blueprint('leads', __name__)
 
@@ -47,6 +47,12 @@ def to_frontend_format(backend_lead):
 @leads_bp.route('', methods=['GET'])
 def get_leads():
     try:
+        actor_id = get_emp_id_from_token()
+        role = get_emp_role_from_token()
+        
+        print("ACTOR:", actor_id)
+        print("ROLE:", role)
+
         filters = {
             'customer': request.args.get('customer'),
             'mobile':   request.args.get('mobile'),
@@ -54,7 +60,7 @@ def get_leads():
             'employee': request.args.get('employee'),
             'project':  request.args.get('project'),
         }
-        leads = leads_service.fetch_all_leads(filters)
+        leads = leads_service.fetch_all_leads(filters, actor_id, role)
         return jsonify([to_frontend_format(lead) for lead in leads]), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -99,7 +105,13 @@ def create_lead():
             'profession':      req_data.get('profession'),
         }
 
-        new_id = leads_service.add_new_lead(data, actor_id=actor_id)
+        role = get_emp_role_from_token()
+
+        new_id = leads_service.add_new_lead(
+            data,
+            actor_id=actor_id,
+            role=role
+        )
         return jsonify({'id': new_id, 'message': 'Lead created successfully'}), 201
 
     except ValueError as e:
@@ -117,6 +129,7 @@ def update_lead(lead_id):
         data = request.json
 
         actor_id = get_emp_id_from_token()
+        role = get_emp_role_from_token()
         if not actor_id:
             return jsonify({'error': 'Unauthorized: valid token required'}), 401
 
@@ -132,7 +145,15 @@ def update_lead(lead_id):
             'profession':      data.get('profession'),
         }
 
-        success = leads_service.update_existing_lead(lead_id, update_data, actor_id=actor_id)
+        # Restrict fields for non-admins
+        if role != "ADMIN":
+            update_data.pop("source", None)
+            update_data.pop("assigned_to", None)
+            
+        success = leads_service.update_existing_lead(
+            lead_id, update_data, actor_id=actor_id
+        )
+
         if success:
             return jsonify({'message': 'Lead updated successfully'}), 200
         else:

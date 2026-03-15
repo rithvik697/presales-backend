@@ -2,7 +2,8 @@ from flask import Blueprint, request, jsonify
 from services.call_logs_service import (
     start_call_service,
     end_call_service,
-    get_call_logs_service
+    get_call_logs_service,
+    get_call_logs_for_lead_ui
 )
 
 call_logs_bp = Blueprint("call_logs", __name__)
@@ -62,5 +63,11 @@ def get_call_logs():
 def get_call_logs_ui():
     from services.call_logs_service import get_call_logs_for_ui
     logs = get_call_logs_for_ui()
+    return jsonify(logs), 200
+
+
+@call_logs_bp.route("/ui/lead/<lead_id>", methods=["GET"])
+def get_call_logs_for_lead(lead_id):
+    logs = get_call_logs_for_lead_ui(lead_id)
     return jsonify(logs), 200
 

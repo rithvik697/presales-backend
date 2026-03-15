@@ -57,17 +57,53 @@ def get_audit_logs():
 
         query = """
             SELECT
-                audit_id,
-                object_name,
-                object_id,
-                property_name,
-                old_value,
-                new_value,
-                modified_by,
-                modified_on,
-                action_type
-            FROM audit_trail
-            ORDER BY modified_on DESC
+                a.audit_id,
+                a.object_name,
+                a.object_id,
+                a.property_name,
+
+                CASE
+                    WHEN a.property_name = 'status_id' THEN ls_old.status_name
+                    WHEN a.property_name = 'source_id' THEN src_old.source_name
+                    WHEN a.property_name = 'emp_id' THEN CONCAT(emp_old.emp_first_name,' ',emp_old.emp_last_name)
+                    ELSE a.old_value
+                END AS old_value,
+
+                CASE
+                    WHEN a.property_name = 'status_id' THEN ls_new.status_name
+                    WHEN a.property_name = 'source_id' THEN src_new.source_name
+                    WHEN a.property_name = 'emp_id' THEN CONCAT(emp_new.emp_first_name,' ',emp_new.emp_last_name)
+                    ELSE a.new_value
+                END AS new_value,
+
+                COALESCE(e.username, a.modified_by) AS modified_by,
+                a.modified_on,
+                a.action_type
+
+            FROM audit_trail a
+
+            LEFT JOIN employee e
+            ON a.modified_by = e.emp_id
+
+            LEFT JOIN lead_status ls_old
+            ON a.old_value = ls_old.status_id
+
+            LEFT JOIN lead_status ls_new
+            ON a.new_value = ls_new.status_id
+
+            LEFT JOIN lead_sources src_old
+            ON a.old_value = src_old.source_id
+
+            LEFT JOIN lead_sources src_new
+            ON a.new_value = src_new.source_id
+
+            LEFT JOIN employee emp_old
+            ON a.old_value = emp_old.emp_id
+
+            LEFT JOIN employee emp_new
+            ON a.new_value = emp_new.emp_id
+
+            ORDER BY a.modified_on DESC
         """
 
         cursor.execute(query)

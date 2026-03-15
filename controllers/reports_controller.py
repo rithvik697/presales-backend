@@ -141,7 +141,7 @@ def download_active_leads(decoded):
             for item in r:
                 val = str(item) if item is not None else ""
                 if ',' in val or '"' in val:
-                    val = f'"{val.replace('"', '""')}"'  
+                    val = '"' + val.replace('"', '""') + '"'
                 clean_row.append(val)
             yield ','.join(clean_row) + '\n'
             
