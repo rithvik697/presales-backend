@@ -34,6 +34,10 @@ def to_frontend_format(backend_lead):
         'projectId':      backend_lead.get('projectId'),
 
         'description':    backend_lead.get('description') or '',
+        'firstContacted': backend_lead.get('firstContacted'),
+        'originallyCreatedBy': backend_lead.get('originallyCreatedBy') or backend_lead.get('createdBy'),
+        'firstAssignedTo': backend_lead.get('firstAssignedTo') or backend_lead.get('assignedTo'),
+        'currentAssignedTo': backend_lead.get('currentAssignedTo') or backend_lead.get('assignedTo'),
         'createdAt':      backend_lead.get('createdAt'),
         'createdBy':      backend_lead.get('createdBy'),
         'modifiedAt':     backend_lead.get('modifiedAt'),

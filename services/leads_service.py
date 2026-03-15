@@ -256,7 +256,14 @@ def fetch_lead_by_id(lead_id):
             l.created_on                                                    AS createdAt,
             l.modified_on                                                   AS modifiedAt,
             ec.emp_first_name                                               AS createdBy,
-            em.emp_first_name                                               AS modifiedBy
+            em.emp_first_name                                               AS modifiedBy,
+            TRIM(CONCAT(ec.emp_first_name, ' ',
+                 IFNULL(ec.emp_last_name, '')))                             AS originallyCreatedBy,
+            TRIM(CONCAT(fae.emp_first_name, ' ',
+                 IFNULL(fae.emp_last_name, '')))                            AS firstAssignedTo,
+            TRIM(CONCAT(e.emp_first_name, ' ',
+                 IFNULL(e.emp_last_name, '')))                              AS currentAssignedTo,
+            fc.first_contacted                                              AS firstContacted
         FROM leads l
         LEFT JOIN customer c          ON l.customer_id = c.customer_id
         LEFT JOIN lead_sources ls     ON l.source_id   = ls.source_id
@@ -264,7 +271,24 @@ def fetch_lead_by_id(lead_id):
         LEFT JOIN employee e          ON l.emp_id      = e.emp_id
         LEFT JOIN employee ec         ON l.created_by  = ec.emp_id
         LEFT JOIN employee em         ON l.modified_by = em.emp_id
+        LEFT JOIN (
+            SELECT a.object_id, a.new_value
+            FROM audit_trail a
+            INNER JOIN (
+                SELECT object_id, MIN(audit_id) AS first_audit_id
+                FROM audit_trail
+                WHERE object_name = 'Leads'
+                  AND property_name = 'emp_id'
+                GROUP BY object_id
+            ) first_emp ON a.audit_id = first_emp.first_audit_id
+        ) fa ON l.lead_id = fa.object_id
+        LEFT JOIN employee fae        ON fa.new_value = fae.emp_id
         LEFT JOIN project_registration pr ON l.project_id = pr.project_id
+        LEFT JOIN (
+            SELECT lead_id, MIN(call_time) AS first_contacted
+            FROM call_log
+            GROUP BY lead_id
+        ) fc ON l.lead_id = fc.lead_id
         WHERE l.lead_id = %s AND l.is_active = 1
         """
         cursor.execute(query, (lead_id,))
