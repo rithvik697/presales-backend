@@ -61,3 +61,16 @@ def send_reset_email(email, reset_link):
     server.login(SMTP_EMAIL, SMTP_PASSWORD)
     server.send_message(msg)
     server.quit()
+
+
+def send_html_email(to_email, subject, html_content):
+    msg = MIMEText(html_content, 'html')
+    msg["Subject"] = subject
+    msg["From"] = SMTP_EMAIL
+    msg["To"] = to_email
+
+    server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+    server.starttls()
+    server.login(SMTP_EMAIL, SMTP_PASSWORD)
+    server.send_message(msg)
+    server.quit()
