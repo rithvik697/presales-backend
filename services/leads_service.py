@@ -28,7 +28,13 @@ def _generate_id(cursor, table, id_col, prefix):
     cursor.execute(query, (f"{prefix}%",))
     result = cursor.fetchone()
 
-    last_number = result[0] if result and result[0] else 0
+    if not result:
+        last_number = 0
+    elif isinstance(result, dict):
+        last_number = next(iter(result.values())) or 0
+    else:
+        last_number = result[0] if result[0] else 0
+
     new_number = last_number + 1
 
     return f"{prefix}{str(new_number).zfill(3)}"
@@ -768,23 +774,35 @@ def delete_existing_lead(lead_id):
         conn.close()
 
 
-def fetch_all_employees():
-    """Fetches all active employees (ID + full name)."""
+def fetch_all_employees(role_id=None, active_only=True):
+    """Fetches employees for lead assignment/filter dropdowns."""
     conn = get_db()
     if not conn:
         return []
 
     try:
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("""
+        query = """
             SELECT
                 emp_id,
+                role_id,
+                emp_status,
                 TRIM(CONCAT(emp_first_name, ' ',
                      IFNULL(emp_last_name, ''))) AS full_name
             FROM employee
-            WHERE emp_status = 'Active'
-            ORDER BY emp_first_name
-        """)
+            WHERE 1 = 1
+        """
+        params = []
+
+        if active_only:
+            query += " AND emp_status = 'Active'"
+
+        if role_id:
+            query += " AND role_id = %s"
+            params.append(role_id)
+
+        query += " ORDER BY emp_first_name"
+        cursor.execute(query, tuple(params))
         return cursor.fetchall()
     except Exception as e:
         logger.error(f"Error fetching employees: {e}")
@@ -804,6 +822,7 @@ def fetch_all_sources():
         cursor.execute("""
             SELECT source_id, source_name
             FROM lead_sources
+            WHERE is_active = 1
             ORDER BY source_name ASC
         """)
         return cursor.fetchall()
@@ -823,13 +842,220 @@ def fetch_all_statuses():
     try:
         cursor = conn.cursor(dictionary=True)
         cursor.execute("""
-            SELECT status_id, status_name
+            SELECT status_id, status_name, status_category, description, pipeline_order
             FROM lead_status
+            WHERE is_active = 1
             ORDER BY pipeline_order ASC
         """)
         return cursor.fetchall()
     except Exception as e:
         logger.error(f"Error fetching lead statuses: {e}")
         return []
+    finally:
+        conn.close()
+
+
+def create_lead_source(data, actor_id=None):
+    conn = get_db()
+    if not conn:
+        raise Exception("DB connection failed")
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+
+        source_name = (data.get('source_name') or '').strip()
+        description = (data.get('description') or '').strip()
+
+        if not source_name:
+            raise ValueError("Source name is required")
+
+        cursor.execute("""
+            SELECT source_id
+            FROM lead_sources
+            WHERE LOWER(source_name) = LOWER(%s)
+              AND is_active = 1
+        """, (source_name,))
+        if cursor.fetchone():
+            raise ValueError("This source already exists")
+
+        source_id = _generate_id(cursor, 'lead_sources', 'source_id', 'S')
+
+        cursor.execute("""
+            INSERT INTO lead_sources
+                (source_id, source_name, source_category, description, is_active, created_at, created_by)
+            VALUES (%s, %s, %s, %s, 1, NOW(), %s)
+        """, (
+            source_id,
+            source_name,
+            None,
+            description or None,
+            actor_id
+        ))
+
+        conn.commit()
+
+        log_audit("lead_sources", source_id, "SOURCE_CREATED", None, source_name, actor_id, "INSERT")
+
+        return {
+            "source_id": source_id,
+            "source_name": source_name,
+            "description": description
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def create_lead_status(data, actor_id=None):
+    conn = get_db()
+    if not conn:
+        raise Exception("DB connection failed")
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+
+        status_name = (data.get('status_name') or '').strip()
+        description = (data.get('description') or '').strip()
+        pipeline_order = data.get('pipeline_order')
+
+        if not status_name:
+            raise ValueError("Activity status is required")
+        if pipeline_order in [None, '']:
+            raise ValueError("Pipeline order is required")
+
+        try:
+            pipeline_order = int(pipeline_order)
+        except (TypeError, ValueError):
+            raise ValueError("Pipeline order must be a valid number")
+
+        if pipeline_order < 1:
+            raise ValueError("Pipeline order must be greater than 0")
+
+        cursor.execute("""
+            SELECT status_id
+            FROM lead_status
+            WHERE LOWER(status_name) = LOWER(%s)
+              AND is_active = 1
+        """, (status_name,))
+        if cursor.fetchone():
+            raise ValueError("This activity status already exists")
+
+        cursor.execute("""
+            SELECT status_id
+            FROM lead_status
+            WHERE pipeline_order = %s
+              AND is_active = 1
+        """, (pipeline_order,))
+        if cursor.fetchone():
+            raise ValueError("Pipeline order already exists")
+
+        status_id = _generate_id(cursor, 'lead_status', 'status_id', 'ST')
+
+        cursor.execute("""
+            INSERT INTO lead_status
+                (status_id, status_name, status_category, description, is_active, created_at, pipeline_order)
+            VALUES (%s, %s, %s, %s, 1, NOW(), %s)
+        """, (
+            status_id,
+            status_name,
+            'ACTIVE',
+            description or None,
+            pipeline_order
+        ))
+
+        conn.commit()
+
+        log_audit("lead_status", status_id, "STATUS_CREATED", None, status_name, actor_id, "INSERT")
+
+        return {
+            "status_id": status_id,
+            "status_name": status_name,
+            "status_category": "ACTIVE",
+            "description": description,
+            "pipeline_order": pipeline_order
+        }
+
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def delete_lead_source(source_id, actor_id=None):
+    conn = get_db()
+    if not conn:
+        raise Exception("DB connection failed")
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT source_id, source_name, is_active
+            FROM lead_sources
+            WHERE source_id = %s
+        """, (source_id,))
+        source = cursor.fetchone()
+
+        if not source:
+            return False
+        if source["is_active"] == 0:
+            return True
+
+        cursor.execute("""
+            UPDATE lead_sources
+            SET is_active = 0,
+                modified_at = NOW(),
+                modified_by = %s
+            WHERE source_id = %s
+        """, (actor_id, source_id))
+
+        conn.commit()
+
+        log_audit("lead_sources", source_id, "SOURCE_DELETED", source["source_name"], None, actor_id, "DELETE")
+        return True
+
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def delete_lead_status(status_id, actor_id=None):
+    conn = get_db()
+    if not conn:
+        raise Exception("DB connection failed")
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT status_id, status_name, is_active
+            FROM lead_status
+            WHERE status_id = %s
+        """, (status_id,))
+        status = cursor.fetchone()
+
+        if not status:
+            return False
+        if status["is_active"] == 0:
+            return True
+
+        cursor.execute("""
+            UPDATE lead_status
+            SET is_active = 0
+            WHERE status_id = %s
+        """, (status_id,))
+
+        conn.commit()
+
+        log_audit("lead_status", status_id, "STATUS_DELETED", status["status_name"], None, actor_id, "DELETE")
+        return True
+
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()

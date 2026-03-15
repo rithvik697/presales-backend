@@ -11,6 +11,7 @@ from controllers.lead_status_history_controller import lead_status_history_bp
 from controllers.audit_controller import audit_controller_bp
 from controllers.reports_controller import reports_bp
 from controllers.notification_controller import notification_bp
+from controllers.project_assignment_controller import project_assignment_bp
 
 app = Flask(__name__)
 CORS(app)
@@ -25,6 +26,7 @@ app.register_blueprint(lead_status_history_bp, url_prefix='/api')
 app.register_blueprint(audit_controller_bp, url_prefix="/api")
 app.register_blueprint(reports_bp, url_prefix="/api/reports")
 app.register_blueprint(notification_bp, url_prefix="/api/notifications")
+app.register_blueprint(project_assignment_bp, url_prefix="/api")
 
 
 

@@ -190,7 +190,9 @@ def delete_lead_api(lead_id):
 @leads_bp.route('/employees', methods=['GET'])
 def get_employees():
     try:
-        return jsonify(leads_service.fetch_all_employees()), 200
+        role_id = request.args.get('role')
+        active_only = request.args.get('active_only', 'true').lower() != 'false'
+        return jsonify(leads_service.fetch_all_employees(role_id=role_id, active_only=active_only)), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -203,9 +205,71 @@ def get_all_sources():
         return jsonify({"error": str(e)}), 500
 
 
+@leads_bp.route('/sources', methods=['POST'])
+def create_source():
+    try:
+        actor_id = get_emp_id_from_token()
+        if not actor_id:
+            return jsonify({'error': 'Unauthorized: valid token required'}), 401
+
+        data = request.json or {}
+        created = leads_service.create_lead_source(data, actor_id=actor_id)
+        return jsonify(created), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@leads_bp.route('/sources/<string:source_id>', methods=['DELETE'])
+def delete_source(source_id):
+    try:
+        actor_id = get_emp_id_from_token()
+        if not actor_id:
+            return jsonify({'error': 'Unauthorized: valid token required'}), 401
+
+        deleted = leads_service.delete_lead_source(source_id, actor_id=actor_id)
+        if not deleted:
+            return jsonify({"error": "Source not found"}), 404
+        return jsonify({"message": "Source deleted successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @leads_bp.route('/statuses', methods=['GET'])
 def get_all_statuses():
     try:
         return jsonify(leads_service.fetch_all_statuses()), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@leads_bp.route('/statuses', methods=['POST'])
+def create_status():
+    try:
+        actor_id = get_emp_id_from_token()
+        if not actor_id:
+            return jsonify({'error': 'Unauthorized: valid token required'}), 401
+
+        data = request.json or {}
+        created = leads_service.create_lead_status(data, actor_id=actor_id)
+        return jsonify(created), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@leads_bp.route('/statuses/<string:status_id>', methods=['DELETE'])
+def delete_status(status_id):
+    try:
+        actor_id = get_emp_id_from_token()
+        if not actor_id:
+            return jsonify({'error': 'Unauthorized: valid token required'}), 401
+
+        deleted = leads_service.delete_lead_status(status_id, actor_id=actor_id)
+        if not deleted:
+            return jsonify({"error": "Status not found"}), 404
+        return jsonify({"message": "Status deleted successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
