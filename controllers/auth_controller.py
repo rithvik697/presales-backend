@@ -39,6 +39,7 @@ def login():
     }
 
     token = jwt.encode(payload, PRIVATE_KEY, algorithm="RS256")
+    
 
     return jsonify({
         "access_token": token,

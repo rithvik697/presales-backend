@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from services import leads_service
-from utils.token_helper import get_emp_id_from_token
+from utils.token_helper import get_emp_id_from_token,get_emp_role_from_token
 
 leads_bp = Blueprint('leads', __name__)
 
@@ -34,6 +34,10 @@ def to_frontend_format(backend_lead):
         'projectId':      backend_lead.get('projectId'),
 
         'description':    backend_lead.get('description') or '',
+        'firstContacted': backend_lead.get('firstContacted'),
+        'originallyCreatedBy': backend_lead.get('originallyCreatedBy') or backend_lead.get('createdBy'),
+        'firstAssignedTo': backend_lead.get('firstAssignedTo') or backend_lead.get('assignedTo'),
+        'currentAssignedTo': backend_lead.get('currentAssignedTo') or backend_lead.get('assignedTo'),
         'createdAt':      backend_lead.get('createdAt'),
         'createdBy':      backend_lead.get('createdBy'),
         'modifiedAt':     backend_lead.get('modifiedAt'),
@@ -47,6 +51,12 @@ def to_frontend_format(backend_lead):
 @leads_bp.route('', methods=['GET'])
 def get_leads():
     try:
+        actor_id = get_emp_id_from_token()
+        role = get_emp_role_from_token()
+        
+        print("ACTOR:", actor_id)
+        print("ROLE:", role)
+
         filters = {
             'customer': request.args.get('customer'),
             'mobile':   request.args.get('mobile'),
@@ -54,7 +64,7 @@ def get_leads():
             'employee': request.args.get('employee'),
             'project':  request.args.get('project'),
         }
-        leads = leads_service.fetch_all_leads(filters)
+        leads = leads_service.fetch_all_leads(filters, actor_id, role)
         return jsonify([to_frontend_format(lead) for lead in leads]), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -99,7 +109,13 @@ def create_lead():
             'profession':      req_data.get('profession'),
         }
 
-        new_id = leads_service.add_new_lead(data, actor_id=actor_id)
+        role = get_emp_role_from_token()
+
+        new_id = leads_service.add_new_lead(
+            data,
+            actor_id=actor_id,
+            role=role
+        )
         return jsonify({'id': new_id, 'message': 'Lead created successfully'}), 201
 
     except ValueError as e:
@@ -117,6 +133,7 @@ def update_lead(lead_id):
         data = request.json
 
         actor_id = get_emp_id_from_token()
+        role = get_emp_role_from_token()
         if not actor_id:
             return jsonify({'error': 'Unauthorized: valid token required'}), 401
 
@@ -132,7 +149,15 @@ def update_lead(lead_id):
             'profession':      data.get('profession'),
         }
 
-        success = leads_service.update_existing_lead(lead_id, update_data, actor_id=actor_id)
+        # Restrict fields for non-admins
+        if role != "ADMIN":
+            update_data.pop("source", None)
+            update_data.pop("assigned_to", None)
+            
+        success = leads_service.update_existing_lead(
+            lead_id, update_data, actor_id=actor_id
+        )
+
         if success:
             return jsonify({'message': 'Lead updated successfully'}), 200
         else:
@@ -165,7 +190,9 @@ def delete_lead_api(lead_id):
 @leads_bp.route('/employees', methods=['GET'])
 def get_employees():
     try:
-        return jsonify(leads_service.fetch_all_employees()), 200
+        role_id = request.args.get('role')
+        active_only = request.args.get('active_only', 'true').lower() != 'false'
+        return jsonify(leads_service.fetch_all_employees(role_id=role_id, active_only=active_only)), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -178,9 +205,71 @@ def get_all_sources():
         return jsonify({"error": str(e)}), 500
 
 
+@leads_bp.route('/sources', methods=['POST'])
+def create_source():
+    try:
+        actor_id = get_emp_id_from_token()
+        if not actor_id:
+            return jsonify({'error': 'Unauthorized: valid token required'}), 401
+
+        data = request.json or {}
+        created = leads_service.create_lead_source(data, actor_id=actor_id)
+        return jsonify(created), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@leads_bp.route('/sources/<string:source_id>', methods=['DELETE'])
+def delete_source(source_id):
+    try:
+        actor_id = get_emp_id_from_token()
+        if not actor_id:
+            return jsonify({'error': 'Unauthorized: valid token required'}), 401
+
+        deleted = leads_service.delete_lead_source(source_id, actor_id=actor_id)
+        if not deleted:
+            return jsonify({"error": "Source not found"}), 404
+        return jsonify({"message": "Source deleted successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @leads_bp.route('/statuses', methods=['GET'])
 def get_all_statuses():
     try:
         return jsonify(leads_service.fetch_all_statuses()), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@leads_bp.route('/statuses', methods=['POST'])
+def create_status():
+    try:
+        actor_id = get_emp_id_from_token()
+        if not actor_id:
+            return jsonify({'error': 'Unauthorized: valid token required'}), 401
+
+        data = request.json or {}
+        created = leads_service.create_lead_status(data, actor_id=actor_id)
+        return jsonify(created), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@leads_bp.route('/statuses/<string:status_id>', methods=['DELETE'])
+def delete_status(status_id):
+    try:
+        actor_id = get_emp_id_from_token()
+        if not actor_id:
+            return jsonify({'error': 'Unauthorized: valid token required'}), 401
+
+        deleted = leads_service.delete_lead_status(status_id, actor_id=actor_id)
+        if not deleted:
+            return jsonify({"error": "Status not found"}), 404
+        return jsonify({"message": "Status deleted successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
