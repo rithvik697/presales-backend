@@ -158,3 +158,124 @@ def get_active_leads_json(decoded):
         return jsonify({"error": result.get("message")}), 500
         
     return jsonify(result), 200
+
+@reports_bp.route('/user-leads-export', methods=['GET'])
+@token_required
+def export_user_leads(decoded):
+    if not is_authorized(decoded):
+        return jsonify({"message": "Unauthorized"}), 403
+        
+    emp_id = request.args.get('emp_id')
+    user_name = request.args.get('user_name', '')
+    activity = request.args.get('activity')
+    start_date = request.args.get('startDate')
+    end_date = request.args.get('endDate')
+    project_id = request.args.get('projectId')
+    
+    if not emp_id or not activity:
+        return jsonify({"error": "emp_id and activity are required"}), 400
+        
+    result = reports_service.get_user_leads_export(emp_id, activity, start_date, end_date, project_id)
+    if not result.get("success"):
+        return jsonify({"error": result.get("message")}), 500
+        
+    rows = result.get("data", [])
+    
+    def generate():
+        yield f'"EMP ID: {emp_id}","User Name: {user_name}"\n\n'
+        yield ','.join(["Lead ID", "Lead Name", "Activity Status", "Description", "Project", "Created On", "Current Status"]) + '\n'
+        for r in rows:
+            clean_row = []
+            row_data = [
+                r.get('lead_id', ''),
+                r.get('lead_name', '').strip(),
+                activity,
+                r.get('lead_description', ''),
+                r.get('project_name', ''),
+                r.get('created_on', ''),
+                r.get('status_name', '')
+            ]
+            for val in row_data:
+                val = str(val) if val is not None else ""
+                if ',' in val or '"' in val:
+                    val = f'"{val.replace('"', '""')}"'  
+                clean_row.append(val)
+            yield ','.join(clean_row) + '\n'
+            
+    filename = f"leads_{emp_id}_{activity.replace(' ', '_')}.csv"
+    return Response(generate(), mimetype="text/csv", headers={"Content-Disposition": f"attachment;filename={filename}"})
+
+@reports_bp.route('/user-leads-export-json', methods=['GET'])
+@token_required
+def export_user_leads_json(decoded):
+    if not is_authorized(decoded):
+        return jsonify({"message": "Unauthorized"}), 403
+        
+    emp_id = request.args.get('emp_id')
+    activity = request.args.get('activity')
+    start_date = request.args.get('startDate')
+    end_date = request.args.get('endDate')
+    project_id = request.args.get('projectId')
+    
+    if not emp_id or not activity:
+        return jsonify({"error": "emp_id and activity are required"}), 400
+        
+    result = reports_service.get_user_leads_export(emp_id, activity, start_date, end_date, project_id)
+    if not result.get("success"):
+        return jsonify({"error": result.get("message")}), 500
+        
+    return jsonify(result), 200
+
+@reports_bp.route('/summary-leads', methods=['GET'])
+@token_required
+def summary_leads(decoded):
+    if not is_authorized(decoded):
+        return jsonify({"message": "Unauthorized"}), 403
+        
+    summary_type = request.args.get('type')
+    start_date = request.args.get('startDate')
+    end_date = request.args.get('endDate')
+    project_id = request.args.get('projectId')
+    user_id = request.args.get('userId')
+    
+    if not summary_type:
+        return jsonify({"error": "type is required"}), 400
+        
+    result = reports_service.get_summary_leads(summary_type, start_date, end_date, project_id, user_id)
+    if not result.get("success"):
+        return jsonify({"error": result.get("message")}), 500
+        
+    return jsonify(result), 200
+
+@reports_bp.route('/weekly-log', methods=['GET'])
+@token_required
+def get_weekly_log(decoded):
+    if not is_authorized(decoded):
+        return jsonify({"message": "Unauthorized"}), 403
+        
+    start_date = request.args.get('startDate')
+    end_date = request.args.get('endDate')
+    project_id = request.args.get('projectId')
+    user_id = request.args.get('userId')
+    
+    result = reports_service.get_weekly_report_log(start_date, end_date, project_id, user_id)
+    if not result.get("success"):
+        return jsonify({"error": result.get("message")}), 500
+        
+    return jsonify(result), 200
+
+@reports_bp.route('/monthly-performance-report', methods=['GET'])
+@token_required
+def get_monthly_performance_report(decoded):
+    if not is_authorized(decoded):
+        return jsonify({"message": "Unauthorized"}), 403
+        
+    target_month = request.args.get('month')
+    target_year = request.args.get('year')
+    project_id = request.args.get('projectId')
+    
+    result = reports_service.get_monthly_performance_report(target_month, target_year, project_id)
+    if not result.get("success"):
+        return jsonify({"error": result.get("message")}), 500
+        
+    return jsonify(result), 200
