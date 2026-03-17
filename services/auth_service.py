@@ -74,7 +74,8 @@ class AuthService:
                 "user_id": user["user_id"],
                 "username": user["username"],
                 "full_name": user["full_name"],
-                "role_type": user["role_id"]
+                "role_type": user["role_id"],
+                "email": user["email"]
             }
 
         except Exception as e:

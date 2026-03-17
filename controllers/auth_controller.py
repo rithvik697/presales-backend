@@ -45,7 +45,8 @@ def login():
         "access_token": token,
         "username": result["username"],
         "full_name": result["full_name"],
-        "role_type": result["role_type"]
+        "role_type": result["role_type"],
+        "email": result["email"]
     }), 200
 
 @auth_controller_bp.route("/me", methods=["GET"])
@@ -91,17 +92,13 @@ def forgot_password():
 
     try:
         auth_service.forgot_password(email)
-
-        return jsonify({
-            "success": True,
-            "message": "Password reset email sent"
-        }), 200
-
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+        logger.warning(f"Forgot password failed for {email}: {e}")
+
+    return jsonify({
+        "success": True,
+        "message": "If an account exists with that email, a reset link has been sent."
+    }), 200
     
 @auth_controller_bp.route("/reset-password", methods=["POST"])
 def reset_password():

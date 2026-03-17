@@ -198,7 +198,7 @@ def export_user_leads(decoded):
             for val in row_data:
                 val = str(val) if val is not None else ""
                 if ',' in val or '"' in val:
-                    val = f'"{val.replace('"', '""')}"'  
+                    val = '"' + val.replace('"', '""') + '"'
                 clean_row.append(val)
             yield ','.join(clean_row) + '\n'
             
