@@ -33,6 +33,7 @@ class AuthService:
                     emp_status,
                     role_id,
                     last_login,
+                    COALESCE(must_change_password, 0) AS must_change_password,
                     CONCAT(
                         emp_first_name,
                         COALESCE(CONCAT(' ', emp_middle_name), ''),
@@ -75,7 +76,8 @@ class AuthService:
                 "username": user["username"],
                 "full_name": user["full_name"],
                 "role_type": user["role_id"],
-                "email": user["email"]
+                "email": user["email"],
+                "must_change_password": bool(user["must_change_password"])
             }
 
         except Exception as e:
@@ -159,7 +161,7 @@ class AuthService:
         try:
             cursor.execute("""
                 UPDATE employee
-                SET password_hash=%s
+                SET password_hash=%s, must_change_password=0
                 WHERE emp_id=%s
             """, (password_hash, emp_id))
 
@@ -201,7 +203,7 @@ class AuthService:
             new_hash = generate_password_hash(new_password, method="scrypt")
 
             cursor.execute(
-                "UPDATE employee SET password_hash = %s WHERE emp_id = %s",
+                "UPDATE employee SET password_hash = %s, must_change_password = 0 WHERE emp_id = %s",
                 (new_hash, user_id)
             )
 

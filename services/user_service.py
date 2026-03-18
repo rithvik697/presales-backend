@@ -88,9 +88,10 @@ def register_user(data, created_by='ADMIN'):
                 created_on,
                 username,
                 email,
-                password_hash
+                password_hash,
+                must_change_password
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)
         """
 
         values = (
