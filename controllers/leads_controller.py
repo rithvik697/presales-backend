@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from services import leads_service
 from utils.token_helper import get_emp_id_from_token,get_emp_role_from_token
+from utils.validators import validate_lead_input
 
 leads_bp = Blueprint('leads', __name__)
 
@@ -95,6 +96,10 @@ def create_lead():
         actor_id = get_emp_id_from_token()
         if not actor_id:
             return jsonify({'error': 'Unauthorized: valid token required'}), 401
+
+        errors = validate_lead_input(req_data)
+        if errors:
+            return jsonify({'error': ', '.join(errors)}), 400
 
         data = {
             'name':            req_data.get('name'),

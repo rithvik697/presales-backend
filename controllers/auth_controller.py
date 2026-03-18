@@ -33,20 +33,21 @@ def login():
         "username": result["username"],
         "full_name": result["full_name"],
         "role_type": result["role_type"],
+        "must_change_password": result["must_change_password"],
         "iss": JWT_ISSUER,
         "aud": JWT_AUDIENCE,
         "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=2)
     }
 
     token = jwt.encode(payload, PRIVATE_KEY, algorithm="RS256")
-    
 
     return jsonify({
         "access_token": token,
         "username": result["username"],
         "full_name": result["full_name"],
         "role_type": result["role_type"],
-        "email": result["email"]
+        "email": result["email"],
+        "must_change_password": result["must_change_password"]
     }), 200
 
 @auth_controller_bp.route("/me", methods=["GET"])

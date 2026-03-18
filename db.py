@@ -1,14 +1,18 @@
+import os
 import mysql.connector
 from mysql.connector import pooling
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ----------------------------------------
-# Database configuration
+# Database configuration from environment
 # ----------------------------------------
 DB_CONFIG = {
-    "host": "localhost",
-    "user": "root",
-    "password": "Admin@99",
-    "database": "presales_crm"
+    "host": os.getenv("DB_HOST", "localhost"),
+    "user": os.getenv("DB_USER", "root"),
+    "password": os.getenv("DB_PASSWORD"),
+    "database": os.getenv("DB_NAME", "presales_crm")
 }
 
 # ----------------------------------------

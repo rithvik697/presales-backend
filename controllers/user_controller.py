@@ -8,6 +8,7 @@ from services.user_service import (
     delete_user_by_id
 )
 from decorators.auth_decorators import token_required
+from utils.validators import validate_user_input
 
 
 user_controller_bp = Blueprint(
@@ -33,6 +34,10 @@ def create_user(decoded):
         }), 400
 
     try:
+        errors = validate_user_input(data)
+        if errors:
+            return jsonify({"success": False, "error": ', '.join(errors)}), 400
+
         current_user = decoded.get('username', 'ADMIN')
 
         user_data = register_user(
