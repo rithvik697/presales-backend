@@ -127,11 +127,12 @@ def get_call_logs_for_ui():
                 END AS callDuration,
 
                 c.call_time AS callTime,
-                l.lead_description AS remarks
+                l.lead_description AS remarks,
+                c.recording_url AS recordingUrl
 
             FROM call_log c
-            JOIN employee e ON c.emp_id = e.emp_id
-            JOIN leads l ON c.lead_id = l.lead_id
+            LEFT JOIN employee e ON c.emp_id = e.emp_id
+            LEFT JOIN leads l ON c.lead_id = l.lead_id
             LEFT JOIN customer cu ON l.customer_id = cu.customer_id
             ORDER BY c.call_time DESC
         """)
@@ -172,7 +173,8 @@ def get_call_logs_for_lead_ui(lead_id):
                     e.emp_middle_name,
                     e.emp_last_name
                 ) AS madeBy,
-                l.lead_description AS remarks
+                l.lead_description AS remarks,
+                c.recording_url AS recordingUrl
             FROM call_log c
             LEFT JOIN employee e ON c.emp_id = e.emp_id
             LEFT JOIN leads l ON c.lead_id = l.lead_id
@@ -181,6 +183,76 @@ def get_call_logs_for_lead_ui(lead_id):
         """, (lead_id,))
 
         return cursor.fetchall()
+
+    finally:
+        cursor.close()
+        db.close()
+
+
+def create_manual_call_log(data):
+    """Create a manual call log entry."""
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute("""
+            INSERT INTO call_log
+            (lead_id, emp_id, call_time, call_duration, call_status, call_source, remarks)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (
+            data.get("lead_id"),
+            data.get("emp_id"),
+            data.get("call_time", datetime.now()),
+            data.get("call_duration"),
+            data.get("call_status", "Connected"),
+            data.get("call_source", "Manual"),
+            data.get("remarks")
+        ))
+
+        db.commit()
+        return cursor.lastrowid
+
+    finally:
+        cursor.close()
+        db.close()
+
+
+def update_call_log(call_id, data):
+    """Update an existing call log entry."""
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute("""
+            UPDATE call_log
+            SET call_status = %s,
+                call_duration = %s,
+                remarks = %s
+            WHERE call_id = %s
+        """, (
+            data.get("call_status"),
+            data.get("call_duration"),
+            data.get("remarks"),
+            call_id
+        ))
+
+        db.commit()
+        return cursor.rowcount > 0
+
+    finally:
+        cursor.close()
+        db.close()
+
+
+def delete_call_log(call_id):
+    """Delete a call log entry."""
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute("DELETE FROM call_log WHERE call_id = %s", (call_id,))
+        db.commit()
+        return cursor.rowcount > 0
 
     finally:
         cursor.close()

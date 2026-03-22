@@ -6,7 +6,7 @@ import csv
 reports_bp = Blueprint('reports_controller', __name__)
 
 def is_authorized(decoded):
-    return decoded.get("role_type") in ["ADMIN", "Sales Manager"]
+    return decoded.get("role_type") in ["ADMIN", "SALES_MGR"]
 
 @reports_bp.route('/summary', methods=['GET'])
 @token_required
@@ -198,7 +198,7 @@ def export_user_leads(decoded):
             for val in row_data:
                 val = str(val) if val is not None else ""
                 if ',' in val or '"' in val:
-                    val = f'"{val.replace('"', '""')}"'  
+                    val = '"' + val.replace('"', '""') + '"'
                 clean_row.append(val)
             yield ','.join(clean_row) + '\n'
             

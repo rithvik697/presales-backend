@@ -820,7 +820,7 @@ def fetch_all_sources():
     try:
         cursor = conn.cursor(dictionary=True)
         cursor.execute("""
-            SELECT source_id, source_name
+            SELECT source_id, source_name, description
             FROM lead_sources
             WHERE is_active = 1
             ORDER BY source_name ASC

@@ -1,11 +1,16 @@
+import os
 import mysql.connector
 from mysql.connector import pooling
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ----------------------------------------
-# Database configuration
+# Database configuration from environment
 # ----------------------------------------
 DB_CONFIG = {
     "host": "localhost",
+    "port" : 3306,
     "user": "root",
     "password": "Kana@123",
     "database": "presales"

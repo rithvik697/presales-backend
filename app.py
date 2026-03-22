@@ -1,5 +1,9 @@
+import os
 from flask import Flask
 from flask_cors import CORS
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Import Blueprints
 from controllers.project_controller import project_bp
@@ -13,9 +17,13 @@ from controllers.reports_controller import reports_bp
 from services.scheduler_service import init_scheduler
 from controllers.notification_controller import notification_bp
 from controllers.project_assignment_controller import project_assignment_bp
+from controllers.lead_transfer_controller import lead_transfer_bp
+from controllers.mcube_controller import mcube_bp
+from controllers.webhook_controller import webhook_bp
 
 app = Flask(__name__)
-CORS(app)
+allowed_origins = os.getenv("CORS_ORIGINS", "http://localhost:4200").split(",")
+CORS(app, origins=allowed_origins, supports_credentials=True)
 
 # Initialize Scheduler
 init_scheduler(app)
@@ -32,6 +40,9 @@ app.register_blueprint(audit_controller_bp, url_prefix="/api")
 app.register_blueprint(reports_bp, url_prefix="/api/reports")
 app.register_blueprint(notification_bp, url_prefix="/api/notifications")
 app.register_blueprint(project_assignment_bp, url_prefix="/api")
+app.register_blueprint(lead_transfer_bp, url_prefix="/api")
+app.register_blueprint(mcube_bp, url_prefix="/api/calls")
+app.register_blueprint(webhook_bp, url_prefix="/api/webhook")
 
 
 
