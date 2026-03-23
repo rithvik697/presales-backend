@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from services.project_service import project_service
+from decorators.auth_decorators import token_required
 import traceback
 
 project_bp = Blueprint(
@@ -11,8 +12,12 @@ project_bp = Blueprint(
 # Create Project
 # -----------------------------
 @project_bp.route('/projects', methods=['POST'])
-def create_project():
+@token_required
+def create_project(decoded):
     try:
+        if decoded.get("role_type") not in ["ADMIN", "SALES_MGR"]:
+            return jsonify({"error": "You do not have permission to create projects"}), 403
+
         data = request.get_json()
 
         if not data:
@@ -69,8 +74,12 @@ def get_project_by_id(project_id):
 # Update Project (General Fields)
 # -----------------------------
 @project_bp.route('/projects/<project_id>', methods=['PUT'])
-def update_project(project_id):
+@token_required
+def update_project(decoded, project_id):
     try:
+        if decoded.get("role_type") not in ["ADMIN", "SALES_MGR"]:
+            return jsonify({"error": "You do not have permission to update projects"}), 403
+
         data = request.get_json()
 
         if not data:
@@ -137,8 +146,12 @@ def get_project_type_options():
 # Update Project Status
 # -----------------------------
 @project_bp.route('/projects/<project_id>/status', methods=['PUT'])
-def update_project_status(project_id):
+@token_required
+def update_project_status(decoded, project_id):
     try:
+        if decoded.get("role_type") not in ["ADMIN", "SALES_MGR"]:
+            return jsonify({"error": "You do not have permission to update project status"}), 403
+
         data = request.get_json()
 
         if not data:
