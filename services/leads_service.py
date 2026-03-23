@@ -2,6 +2,7 @@ from services.lead_status_history_service import create_history
 from db import get_db
 from services.audit_service import log_audit
 from services.notification_service import create_notification
+from utils.phone_utils import get_supported_country_codes, normalize_phone_number
 
 import logging
 
@@ -91,11 +92,12 @@ def _check_duplicate_phone(cursor, phone, exclude_lead_id=None):
 
 def _get_or_create_customer(cursor, data, actor_id=None):
     """Find or create a customer by phone number."""
-    phone = data.get('phone')
+    phone = normalize_phone_number(data.get('phone'))
     if not phone:
         return None
 
     clean_phone = ''.join(filter(str.isdigit, phone))[-10:]
+    alternate_phone = normalize_phone_number(data.get('alternate_phone'))
 
     cursor.execute(
         """SELECT customer_id FROM customer
@@ -119,7 +121,7 @@ def _get_or_create_customer(cursor, data, actor_id=None):
             created_on, created_by, modified_on, modified_by, is_active)
            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s, NULL, NULL, 1)""",
         (customer_id, first_name, last_name, phone,
-         data.get('alternate_phone'),
+         alternate_phone,
          data.get('email'),
          data.get('profession'),
          actor_id)
@@ -337,6 +339,8 @@ def add_new_lead(data, actor_id=None, role=None):
         cursor = conn.cursor()
 
         # --- Extract IDs from request ---
+        phone = normalize_phone_number(data.get('phone'))
+        alternate_phone = normalize_phone_number(data.get('alternate_phone'))
         source_id   = data.get('source')
         status_id   = data.get('status')
         emp_id      = data.get('assigned_to')
@@ -362,10 +366,14 @@ def add_new_lead(data, actor_id=None, role=None):
             _validate_foreign_key(cursor, 'project_registration', 'project_id', project_id, 'project')
 
         # --- Check for duplicate phone (client requirement) ---
-        _check_duplicate_phone(cursor, data.get('phone'))
+        _check_duplicate_phone(cursor, phone)
 
         # --- Create or find customer ---
-        customer_id = _get_or_create_customer(cursor, data, actor_id)
+        customer_id = _get_or_create_customer(cursor, {
+            **data,
+            'phone': phone,
+            'alternate_phone': alternate_phone
+        }, actor_id)
 
         # --- Generate lead ID and insert ---
         new_lead_id = _generate_id(cursor, 'leads', 'lead_id', 'L')
@@ -724,7 +732,7 @@ def update_existing_lead(lead_id, data, actor_id=None):
                 first,
                 last,
                 data.get('email'),
-                ''.join(filter(str.isdigit, data.get('alternate_phone', '')))[-10:]
+                normalize_phone_number(data.get('alternate_phone'))
                 if data.get('alternate_phone') else None,
                 data.get('profession'),
                 actor_id,
@@ -853,6 +861,10 @@ def fetch_all_statuses():
         return []
     finally:
         conn.close()
+
+
+def fetch_country_codes():
+    return get_supported_country_codes()
 
 
 def create_lead_source(data, actor_id=None):

@@ -249,6 +249,14 @@ def get_all_statuses():
         return jsonify({"error": str(e)}), 500
 
 
+@leads_bp.route('/country-codes', methods=['GET'])
+def get_country_codes():
+    try:
+        return jsonify(leads_service.fetch_country_codes()), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @leads_bp.route('/statuses', methods=['POST'])
 def create_status():
     try:
