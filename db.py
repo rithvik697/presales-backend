@@ -9,10 +9,11 @@ load_dotenv()
 # Database configuration from environment
 # ----------------------------------------
 DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "localhost"),
-    "user": os.getenv("DB_USER", "root"),
-    "password": os.getenv("DB_PASSWORD"),
-    "database": os.getenv("DB_NAME", "presales_crm")
+    "host": "localhost",
+    "port" : 3306,
+    "user": "root",
+    "password": "Root@1234",
+    "database": "presales_crm_3"
 }
 
 # ----------------------------------------

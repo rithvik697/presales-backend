@@ -6,7 +6,7 @@ import csv
 reports_bp = Blueprint('reports_controller', __name__)
 
 def is_authorized(decoded):
-    return decoded.get("role_type") in ["ADMIN", "Sales Manager"]
+    return decoded.get("role_type") in ["ADMIN", "SALES_MGR"]
 
 @reports_bp.route('/summary', methods=['GET'])
 @token_required
