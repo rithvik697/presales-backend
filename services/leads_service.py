@@ -209,7 +209,7 @@ def fetch_all_leads(filters=None, actor_id=None, role=None):
         # LEAD VISIBILITY CONTROL
         # --------------------------------------------------
 
-        if not role or role.upper() != "ADMIN":
+        if not role or role.upper() not in {"ADMIN", "SALES_MGR"}:
             query += " AND l.emp_id = %s"
             params.append(actor_id)
 
