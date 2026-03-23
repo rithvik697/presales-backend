@@ -10,11 +10,11 @@ def validate_email(email):
 
 
 def validate_phone(phone):
-    """Validate phone number (Indian format: 10 digits)."""
+    """Validate phone number in local or international format."""
     if not phone:
         return False
     clean = ''.join(filter(str.isdigit, phone))
-    return len(clean) >= 10
+    return 10 <= len(clean) <= 15
 
 
 def validate_password_strength(password):
