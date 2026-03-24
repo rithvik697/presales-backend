@@ -20,6 +20,8 @@ from controllers.project_assignment_controller import project_assignment_bp
 from controllers.lead_transfer_controller import lead_transfer_bp
 from controllers.mcube_controller import mcube_bp
 from controllers.webhook_controller import webhook_bp
+from controllers.bulk_upload_controller import bulk_upload_bp
+from controllers.website_leads_controller import website_leads_bp
 
 app = Flask(__name__)
 allowed_origins = os.getenv("CORS_ORIGINS", "http://localhost:4200").split(",")
@@ -43,6 +45,8 @@ app.register_blueprint(project_assignment_bp, url_prefix="/api")
 app.register_blueprint(lead_transfer_bp, url_prefix="/api")
 app.register_blueprint(mcube_bp, url_prefix="/api/calls")
 app.register_blueprint(webhook_bp, url_prefix="/api/webhook")
+app.register_blueprint(website_leads_bp, url_prefix="/api/website")
+app.register_blueprint(bulk_upload_bp, url_prefix="/api")
 
 
 

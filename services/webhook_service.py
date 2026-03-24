@@ -58,7 +58,7 @@ def _find_project_by_name(cursor, project_name):
 
     cursor.execute("""
         SELECT project_id FROM project_registration
-        WHERE LOWER(project_name) = LOWER(%s) AND project_status = 'Active'
+        WHERE LOWER(project_name) = LOWER(%s)
         LIMIT 1
     """, (project_name,))
     result = cursor.fetchone()
@@ -69,7 +69,7 @@ def _find_project_by_name(cursor, project_name):
     # Try partial match
     cursor.execute("""
         SELECT project_id FROM project_registration
-        WHERE LOWER(project_name) LIKE LOWER(%s) AND project_status = 'Active'
+        WHERE LOWER(project_name) LIKE LOWER(%s)
         LIMIT 1
     """, (f"%{project_name}%",))
     result = cursor.fetchone()

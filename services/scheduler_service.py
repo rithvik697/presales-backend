@@ -7,10 +7,29 @@ from services.reports_service import (
     get_daily_calls_and_fresh_leads
 )
 from services.email_service import send_html_email
+from services.notification_service import create_notification
 from datetime import datetime, timedelta
 import traceback
 
 scheduler = APScheduler()
+SITE_VISIT_REMINDER_TITLE = "Expected Site Visit"
+REMINDER_TYPES = {
+    "D_MINUS_2_EOD": {
+        "days_before": 2,
+        "time_label": "7:30 PM reminder",
+        "job_label": "2-day"
+    },
+    "D_MINUS_1_EOD": {
+        "days_before": 1,
+        "time_label": "7:30 PM reminder",
+        "job_label": "1-day"
+    },
+    "VISIT_DAY_MORNING": {
+        "days_before": 0,
+        "time_label": "9:30 AM reminder",
+        "job_label": "same-day"
+    }
+}
 
 def get_admin_emails():
     try:
@@ -58,6 +77,138 @@ def test_report_job():
     send_weekly_report()
     # Also trigger monthly to be sure
     send_monthly_report()
+
+
+def ensure_site_visit_reminder_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS site_visit_reminders (
+            reminder_id INT AUTO_INCREMENT PRIMARY KEY,
+            schedule_id INT NOT NULL,
+            emp_id VARCHAR(20) NOT NULL,
+            reminder_type VARCHAR(30) NOT NULL,
+            sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_site_visit_reminder (schedule_id, emp_id, reminder_type)
+        )
+    """)
+
+
+def send_site_visit_reminders(reminder_type):
+    reminder_config = REMINDER_TYPES[reminder_type]
+    target_date = (datetime.now() + timedelta(days=reminder_config["days_before"])).date()
+
+    print(
+        f"Running {reminder_config['job_label']} site visit reminder job at {datetime.now()} "
+        f"for visits on {target_date}"
+    )
+
+    conn = None
+    cursor = None
+
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        ensure_site_visit_reminder_table(cursor)
+
+        cursor.execute("""
+            SELECT
+                s.schedule_id,
+                s.lead_id,
+                s.scheduled_at,
+                TRIM(CONCAT(c.customer_first_name, ' ', IFNULL(c.customer_last_name, ''))) AS lead_name
+            FROM lead_scheduled_activities s
+            JOIN lead_status ls ON ls.status_id = s.status_id
+            JOIN leads l ON l.lead_id = s.lead_id AND l.is_active = 1
+            JOIN customer c ON c.customer_id = l.customer_id
+            WHERE ls.status_name = 'Expected Site Visit'
+              AND s.status = 'SCHEDULED'
+              AND DATE(s.scheduled_at) = %s
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM lead_status_history h
+                    JOIN lead_status done_ls ON done_ls.status_id = h.new_status_id
+                    WHERE h.lead_id = s.lead_id
+                      AND done_ls.status_name = 'Site Visit Done'
+                      AND h.changed_at >= s.created_on
+              )
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM lead_scheduled_activities s2
+                    JOIN lead_status ls2 ON ls2.status_id = s2.status_id
+                    WHERE s2.lead_id = s.lead_id
+                      AND s2.status = 'SCHEDULED'
+                      AND ls2.status_name = 'Expected Site Visit'
+                      AND s2.schedule_id > s.schedule_id
+              )
+            ORDER BY s.scheduled_at ASC
+        """, (target_date,))
+
+        schedules = cursor.fetchall()
+        if not schedules:
+            print(f"No site visit schedules found for reminder type {reminder_type}.")
+            return
+
+        cursor.execute("""
+            SELECT emp_id
+            FROM employee
+            WHERE emp_status = 'Active'
+        """)
+        users = cursor.fetchall()
+
+        if not users:
+            print("No active users found for site visit reminders.")
+            return
+
+        reminders_created = 0
+
+        for schedule in schedules:
+            visit_time = schedule["scheduled_at"].strftime("%d-%m-%Y %I:%M %p")
+            message = (
+                f"{schedule['lead_name']} ({schedule['lead_id']}) is expected to visit the site on "
+                f"{visit_time}. This is your {reminder_config['time_label']} notification."
+            )
+
+            for user in users:
+                cursor.execute("""
+                    SELECT 1
+                    FROM site_visit_reminders
+                    WHERE schedule_id = %s
+                      AND emp_id = %s
+                      AND reminder_type = %s
+                """, (schedule["schedule_id"], user["emp_id"], reminder_type))
+
+                if cursor.fetchone():
+                    continue
+
+                create_notification(
+                    user["emp_id"],
+                    SITE_VISIT_REMINDER_TITLE,
+                    message,
+                    "Leads",
+                    schedule["lead_id"]
+                )
+
+                cursor.execute("""
+                    INSERT INTO site_visit_reminders (schedule_id, emp_id, reminder_type)
+                    VALUES (%s, %s, %s)
+                """, (schedule["schedule_id"], user["emp_id"], reminder_type))
+
+                reminders_created += 1
+
+        conn.commit()
+        print(
+            f"Created {reminders_created} site visit reminder notifications for "
+            f"reminder type {reminder_type}."
+        )
+    except Exception:
+        if conn:
+            conn.rollback()
+        print(f"Error in send_site_visit_reminders job: {traceback.format_exc()}")
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
 def send_weekly_report():
@@ -429,6 +580,18 @@ def send_daily_eod_report():
         print(f"Error in send_daily_eod_report: {traceback.format_exc()}")
 
 
+
+def send_site_visit_reminders_two_days_before():
+    send_site_visit_reminders("D_MINUS_2_EOD")
+
+
+def send_site_visit_reminders_one_day_before():
+    send_site_visit_reminders("D_MINUS_1_EOD")
+
+
+def send_site_visit_reminders_visit_day():
+    send_site_visit_reminders("VISIT_DAY_MORNING")
+
 def init_scheduler(app):
     scheduler.init_app(app)
     
@@ -460,6 +623,28 @@ def init_scheduler(app):
     except:
         # Fallback to Jan 1st
         scheduler.add_job(id='annual_report', func=send_annual_report, trigger='cron', month=1, day=1, hour=0, minute=15)
+
+    scheduler.add_job(
+        id='site_visit_reminder_two_days_before',
+        func=send_site_visit_reminders_two_days_before,
+        trigger='cron',
+        hour=19,
+        minute=30
+    )
+    scheduler.add_job(
+        id='site_visit_reminder_one_day_before',
+        func=send_site_visit_reminders_one_day_before,
+        trigger='cron',
+        hour=19,
+        minute=30
+    )
+    scheduler.add_job(
+        id='site_visit_reminder_visit_day',
+        func=send_site_visit_reminders_visit_day,
+        trigger='cron',
+        hour=9,
+        minute=30
+    )
         
     scheduler.start()
 

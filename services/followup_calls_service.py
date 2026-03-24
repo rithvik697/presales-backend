@@ -1,6 +1,7 @@
 from db import get_db
 from services.audit_service import log_audit
 from services.notification_service import create_notification
+from datetime import datetime
 
 
 def _ensure_scheduled_activities_table(cursor):
@@ -118,7 +119,13 @@ def create_scheduled_activity(lead_id, status_id, scheduled_at, remarks, created
 
         if status_name in ["Expected Site Visit", "Site Visit Done"]:
             if status_name == "Expected Site Visit":
-                message = f"{lead_name} ({lead_id}) is expected to visit the site."
+                visit_time = normalized_scheduled_at
+                try:
+                    visit_time = datetime.strptime(normalized_scheduled_at, "%Y-%m-%d %H:%M:%S").strftime("%d-%m-%Y %I:%M %p")
+                except Exception:
+                    pass
+
+                message = f"{lead_name} ({lead_id}) is expected to visit the site on {visit_time}."
             else:
                 message = f"{lead_name} ({lead_id}) has completed the site visit."
 
