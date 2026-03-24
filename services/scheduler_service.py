@@ -1,6 +1,11 @@
 from flask_apscheduler import APScheduler
 from db import get_db
-from services.reports_service import get_reports_summary, get_monthly_performance_report
+from services.reports_service import (
+    get_reports_summary, 
+    get_monthly_performance_report,
+    get_daily_site_visits,
+    get_daily_calls_and_fresh_leads
+)
 from services.email_service import send_html_email
 from services.notification_service import create_notification
 from datetime import datetime, timedelta
@@ -35,6 +40,29 @@ def get_admin_emails():
         return [admin['email'] for admin in admins]
     except Exception as e:
         print(f"Error fetching admin emails: {e}")
+        return []
+    finally:
+        if 'cursor' in locals() and cursor:
+            cursor.close()
+        if 'conn' in locals() and conn:
+            conn.close()
+
+
+def get_admin_and_manager_emails():
+    """Returns emails for both Admins and Sales Managers."""
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT DISTINCT email 
+            FROM employee 
+            WHERE role_id IN ('ADMIN', 'SALES_MANAGER') 
+              AND email IS NOT NULL AND email != ''
+        """)
+        rows = cursor.fetchall()
+        return [r['email'] for r in rows]
+    except Exception as e:
+        print(f"Error fetching admin/manager emails: {e}")
         return []
     finally:
         if 'cursor' in locals() and cursor:
@@ -435,6 +463,123 @@ def send_annual_report():
     except Exception as e:
         print(f"Error in send_annual_report job: {traceback.format_exc()}")
 
+def send_daily_site_visit_report():
+    """Sent at 7:30 PM daily — shows today's Site Visit Done events."""
+    print(f"Running Daily Site Visit Report at {datetime.now()}")
+    try:
+        today = datetime.now().strftime('%d %B %Y')
+        res = get_daily_site_visits()
+        if not res['success']:
+            print("Failed to fetch daily site visit data.")
+            return
+
+        visits = res['data']
+        rows_html = ''.join([
+            f"""<tr>
+                <td style="border:1px solid #ddd;padding:10px;">{v['employee_name']}</td>
+                <td style="border:1px solid #ddd;padding:10px;">{v['lead_name']}</td>
+                <td style="border:1px solid #ddd;padding:10px;">{v['project_name']}</td>
+                <td style="border:1px solid #ddd;padding:10px;">{v['visit_time']}</td>
+            </tr>"""
+            for v in visits
+        ]) if visits else '<tr><td colspan="4" style="padding:12px;text-align:center;color:#888;">No site visits recorded today.</td></tr>'
+
+        html = f"""
+        <html><body style="font-family:Arial,sans-serif;color:#333;">
+        <div style="background:#1976d2;color:white;padding:20px;text-align:center;">
+            <h2>Daily Site Visit Report</h2><p>{today}</p>
+        </div>
+        <div style="padding:20px;">
+            <p><strong>Total Site Visits Today: {len(visits)}</strong></p>
+            <table style="width:100%;border-collapse:collapse;">
+                <tr style="background:#f2f2f2;">
+                    <th style="border:1px solid #ddd;padding:10px;text-align:left;">Executive</th>
+                    <th style="border:1px solid #ddd;padding:10px;text-align:left;">Lead</th>
+                    <th style="border:1px solid #ddd;padding:10px;text-align:left;">Project</th>
+                    <th style="border:1px solid #ddd;padding:10px;text-align:left;">Time</th>
+                </tr>
+                {rows_html}
+            </table>
+        </div>
+        <div style="background:#f2f2f2;padding:10px;text-align:center;font-size:0.8em;color:#888;">&copy; {datetime.now().year} CRM Automated Reporting</div>
+        </body></html>
+        """
+
+        emails = get_admin_and_manager_emails()
+        for email in emails:
+            send_html_email(email, f"Daily Site Visit Report – {today}", html)
+        print(f"Daily site visit report sent to {len(emails)} recipients.")
+    except Exception as e:
+        print(f"Error in send_daily_site_visit_report: {traceback.format_exc()}")
+
+
+def send_daily_eod_report():
+    """Sent at 11:59 PM daily — shows calls attempted and fresh leads today."""
+    print(f"Running Daily EOD Report at {datetime.now()}")
+    try:
+        today = datetime.now().strftime('%d %B %Y')
+        res = get_daily_calls_and_fresh_leads()
+        if not res['success']:
+            print("Failed to fetch EOD data.")
+            return
+
+        data = res['data']
+        fresh_leads = data['fresh_leads']
+        calls_by_emp = data['calls_by_employee']
+
+        calls_rows = ''.join([
+            f"<tr><td style='border:1px solid #ddd;padding:8px;'>{r['employee_name']}</td>"
+            f"<td style='border:1px solid #ddd;padding:8px;text-align:center;'>{r['calls_today']}</td></tr>"
+            for r in calls_by_emp
+        ]) if calls_by_emp else '<tr><td colspan="2" style="padding:10px;text-align:center;color:#888;">No calls recorded today.</td></tr>'
+
+        leads_rows = ''.join([
+            f"""<tr>
+                <td style='border:1px solid #ddd;padding:8px;'>{l['lead_name']}</td>
+                <td style='border:1px solid #ddd;padding:8px;'>{l['assigned_to']}</td>
+                <td style='border:1px solid #ddd;padding:8px;'>{l['project_name']}</td>
+                <td style='border:1px solid #ddd;padding:8px;'>{l['status_name'] or '-'}</td>
+            </tr>"""
+            for l in fresh_leads
+        ]) if fresh_leads else '<tr><td colspan="4" style="padding:10px;text-align:center;color:#888;">No new leads today.</td></tr>'
+
+        html = f"""
+        <html><body style="font-family:Arial,sans-serif;color:#333;">
+        <div style="background:#1976d2;color:white;padding:20px;text-align:center;">
+            <h2>Daily End-of-Day Report</h2><p>{today}</p>
+        </div>
+        <div style="padding:20px;">
+            <h3>📞 Calls Attempted – Total: {data['total_calls']}</h3>
+            <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+                <tr style="background:#f2f2f2;">
+                    <th style="border:1px solid #ddd;padding:8px;text-align:left;">Executive</th>
+                    <th style="border:1px solid #ddd;padding:8px;text-align:center;">Calls</th>
+                </tr>
+                {calls_rows}
+            </table>
+            <h3>🌱 Fresh Leads Today – Total: {data['fresh_leads_count']}</h3>
+            <table style="width:100%;border-collapse:collapse;">
+                <tr style="background:#f2f2f2;">
+                    <th style="border:1px solid #ddd;padding:8px;text-align:left;">Lead</th>
+                    <th style="border:1px solid #ddd;padding:8px;text-align:left;">Assigned To</th>
+                    <th style="border:1px solid #ddd;padding:8px;text-align:left;">Project</th>
+                    <th style="border:1px solid #ddd;padding:8px;text-align:left;">Status</th>
+                </tr>
+                {leads_rows}
+            </table>
+        </div>
+        <div style="background:#f2f2f2;padding:10px;text-align:center;font-size:0.8em;color:#888;">&copy; {datetime.now().year} CRM Automated Reporting</div>
+        </body></html>
+        """
+
+        emails = get_admin_and_manager_emails()
+        for email in emails:
+            send_html_email(email, f"Daily EOD Report – {today}", html)
+        print(f"Daily EOD report sent to {len(emails)} recipients.")
+    except Exception as e:
+        print(f"Error in send_daily_eod_report: {traceback.format_exc()}")
+
+
 
 def send_site_visit_reminders_two_days_before():
     send_site_visit_reminders("D_MINUS_2_EOD")
@@ -450,6 +595,12 @@ def send_site_visit_reminders_visit_day():
 def init_scheduler(app):
     scheduler.init_app(app)
     
+    # Daily: Site Visit Report at 7:30 PM
+    scheduler.add_job(id='daily_site_visit_report', func=send_daily_site_visit_report, trigger='cron', hour=19, minute=30)
+
+    # Daily: EOD Calls + Fresh Leads at 11:59 PM
+    scheduler.add_job(id='daily_eod_report', func=send_daily_eod_report, trigger='cron', hour=23, minute=59)
+
     # Weekly: Every Sunday at 19:00 (7:00 PM)
     scheduler.add_job(id='weekly_report', func=send_weekly_report, trigger='cron', day_of_week='sun', hour=19, minute=0)
     
