@@ -109,14 +109,14 @@ def create_lead():
 
         data = {
             'name':            req_data.get('name'),
-            'phone':           req_data.get('phone'),
+            'phone':           req_data.get('phone') or None,
             'email':           req_data.get('email'),
             'project':         req_data.get('project'),        # project_id
             'source':          req_data.get('source'),         # source_id
             'status':          req_data.get('status'),         # status_id
             'assigned_to':     req_data.get('assignedTo'),     # emp_id
             'description':     req_data.get('description'),
-            'alternate_phone': req_data.get('alternatePhone'),
+            'alternate_phone': req_data.get('alternatePhone') or None,
             'profession':      req_data.get('profession'),
         }
 

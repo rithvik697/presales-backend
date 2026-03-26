@@ -12,8 +12,8 @@ DB_CONFIG = {
     "host": "localhost",
     "port" : 3306,
     "user": "root",
-    "password": "Root@1234",
-    "database": "presales_crm_3"
+    "password": "Kana@123",
+    "database": "presales"
 }
 
 # ----------------------------------------

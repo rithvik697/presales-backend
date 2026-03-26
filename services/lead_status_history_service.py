@@ -380,3 +380,4 @@ def get_status_options():
 
         cursor.close()
         conn.close()
+        

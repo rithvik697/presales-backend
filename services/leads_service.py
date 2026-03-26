@@ -84,8 +84,13 @@ def _check_duplicate_phone(cursor, phone, exclude_lead_id=None):
     existing = cursor.fetchone()
 
     if existing:
+        if isinstance(existing, dict):
+            existing_lead_id = existing.get("lead_id")
+        else:
+            existing_lead_id = existing[0]
+
         raise ValueError(
-            f"A lead with phone number '{phone}' already exists (Lead ID: {existing[0]}). "
+            f"A lead with phone number '{phone}' already exists (Lead ID: {existing_lead_id}). "
             f"Use the existing lead instead of creating a duplicate."
         )
 

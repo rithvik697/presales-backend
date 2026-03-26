@@ -153,10 +153,10 @@ def get_call_logs_for_lead_ui(lead_id):
             SELECT
                 c.call_id AS callId,
                 DATE(c.call_time) AS callDate,
-                TIME(c.call_time) AS startTime,
+                CAST(TIME(c.call_time) AS CHAR) AS startTime,
                 CASE
                     WHEN c.call_duration IS NULL THEN NULL
-                    ELSE ADDTIME(TIME(c.call_time), SEC_TO_TIME(c.call_duration))
+                    ELSE CAST(ADDTIME(TIME(c.call_time), SEC_TO_TIME(c.call_duration)) AS CHAR)
                 END AS endTime,
                 CASE
                     WHEN c.call_duration IS NULL THEN '-'
