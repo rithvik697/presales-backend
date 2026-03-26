@@ -6,6 +6,12 @@ from utils.validators import validate_lead_input
 leads_bp = Blueprint('leads', __name__)
 
 
+def _serialize_datetime(value):
+    if hasattr(value, 'strftime'):
+        return value.strftime('%Y-%m-%d %H:%M:%S')
+    return value
+
+
 def to_frontend_format(backend_lead):
     """
     Maps backend dictionary to frontend camelCase.
@@ -35,13 +41,13 @@ def to_frontend_format(backend_lead):
         'projectId':      backend_lead.get('projectId'),
 
         'description':    backend_lead.get('description') or '',
-        'firstContacted': backend_lead.get('firstContacted'),
+        'firstContacted': _serialize_datetime(backend_lead.get('firstContacted')),
         'originallyCreatedBy': backend_lead.get('originallyCreatedBy') or backend_lead.get('createdBy'),
         'firstAssignedTo': backend_lead.get('firstAssignedTo') or backend_lead.get('assignedTo'),
         'currentAssignedTo': backend_lead.get('currentAssignedTo') or backend_lead.get('assignedTo'),
-        'createdAt':      backend_lead.get('createdAt'),
+        'createdAt':      _serialize_datetime(backend_lead.get('createdAt')),
         'createdBy':      backend_lead.get('createdBy'),
-        'modifiedAt':     backend_lead.get('modifiedAt'),
+        'modifiedAt':     _serialize_datetime(backend_lead.get('modifiedAt')),
         'modifiedBy':     backend_lead.get('modifiedBy'),
     }
 
@@ -154,8 +160,8 @@ def update_lead(lead_id):
             'profession':      data.get('profession'),
         }
 
-        # Restrict fields for non-admins
-        if role != "ADMIN":
+        # Restrict fields only for sales executives; managers follow admin behavior
+        if role not in ["ADMIN", "SALES_MGR"]:
             update_data.pop("source", None)
             update_data.pop("assigned_to", None)
             
