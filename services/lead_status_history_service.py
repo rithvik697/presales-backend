@@ -11,6 +11,7 @@ from services.audit_service import log_audit
 from services.notification_service import create_notification
 from services.followup_calls_service import get_scheduled_activities_by_lead
 from services.lead_comments_service import get_comments_by_lead
+from services.email_service import send_html_email
 
 
 def get_history_by_lead(lead_id):
@@ -299,6 +300,54 @@ def create_history(lead_id, data, emp_id):
                     "Leads",
                     lead_id
                 )
+
+        # DEAL CLOSED → Congratulations email to Admins & Sales Managers
+        if status_name == "Deal Closed":
+            try:
+                # Fetch project name
+                cursor.execute("""
+                    SELECT COALESCE(p.project_name, 'Unknown') AS project_name,
+                           COALESCE(e.emp_first_name, 'Sales Executive') AS exec_name
+                    FROM leads l
+                    LEFT JOIN project_registration p ON l.project_id = p.project_id
+                    LEFT JOIN employee e ON l.emp_id = e.emp_id
+                    WHERE l.lead_id = %s
+                """, (lead_id,))
+                lead_extra = cursor.fetchone() or {}
+                project_name = lead_extra.get('project_name', 'Unknown')
+                exec_name = lead_extra.get('exec_name', 'Sales Executive')
+
+                cursor.execute("""
+                    SELECT DISTINCT email FROM employee
+                    WHERE role_id IN ('ADMIN', 'SALES_MANAGER')
+                      AND email IS NOT NULL AND email != ''
+                """)
+                mgr_emails = [r['email'] for r in cursor.fetchall()]
+
+                html = f"""
+<html><body style="font-family:Arial,sans-serif;color:#333;max-width:600px;margin:auto;">
+<div style="background:#2e7d32;color:white;padding:20px;text-align:center;border-radius:6px 6px 0 0;">
+  <h2 style="margin:0;">&#127881; Deal Closed!</h2>
+</div>
+<div style="padding:24px;border:1px solid #e0e0e0;border-top:none;">
+  <p style="font-size:1.1em;">Congratulations! A deal has been closed.</p>
+  <p><strong>Lead:</strong> {lead_name}</p>
+  <p><strong>Lead ID:</strong> {lead_id}</p>
+  <p><strong>Project:</strong> {project_name}</p>
+  <p><strong>Closed by:</strong> {exec_name}</p>
+  <p><strong>Remarks:</strong> {remarks or 'N/A'}</p>
+  <p style="margin-top:20px;font-size:0.9em;color:#666;">Log in to the CRM to view full lead details.</p>
+</div>
+<div style="background:#f2f2f2;padding:8px;text-align:center;font-size:0.8em;color:#888;">CRM Automated Notification</div>
+</body></html>
+"""
+                for mgr_email in mgr_emails:
+                    try:
+                        send_html_email(mgr_email, f"\U0001f389 Deal Closed – {lead_name} ({project_name})", html)
+                    except Exception as mail_err:
+                        print(f"Failed to send deal-closed email to {mgr_email}: {mail_err}")
+            except Exception as deal_err:
+                print(f"Failed to send deal-closed congratulations email: {deal_err}")
 
         conn.commit()
 

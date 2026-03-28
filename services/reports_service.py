@@ -514,7 +514,7 @@ def get_summary_leads(summary_type, start_date=None, end_date=None, project_id=N
                     COALESCE(e.emp_first_name, 'Unassigned') AS employee_name,
                     COALESCE(p.project_name, 'Unknown') AS project_name,
                     'Deal Closed' AS label,
-                    h.changed_at AS created_on,
+                    MAX(h.changed_at) AS created_on,
                     curr_s.status_name AS current_status
                 FROM lead_status_history h
                 JOIN leads l ON h.lead_id = l.lead_id
@@ -525,7 +525,8 @@ def get_summary_leads(summary_type, start_date=None, end_date=None, project_id=N
                 LEFT JOIN project_registration p ON l.project_id = p.project_id
                 {hist_cond}
                 AND ns.status_name = 'Deal Closed'
-                ORDER BY h.changed_at DESC
+                GROUP BY h.lead_id
+                ORDER BY created_on DESC
             """
             cursor.execute(query, tuple(hist_params))
             result = cursor.fetchall()
@@ -726,6 +727,7 @@ def get_weekly_report_log(start_date=None, end_date=None, project_id=None, user_
             
         query = f"""
             SELECT 
+                l.lead_id,
                 l.created_on,
                 CONCAT(COALESCE(c.customer_first_name, ''), ' ', COALESCE(c.customer_last_name, '')) as customer_name,
                 COALESCE(p.project_name, 'Unknown') as project_name,
@@ -782,6 +784,7 @@ def get_monthly_report_log(month=None, year=None, project_id=None, user_id=None,
             
         query = f"""
             SELECT 
+                l.lead_id,
                 l.created_on,
                 l.lead_description as lead_name,
                 CONCAT(COALESCE(c.customer_first_name, ''), ' ', COALESCE(c.customer_last_name, '')) as customer_name,
@@ -876,6 +879,10 @@ def get_monthly_performance_report(target_month=None, target_year=None, project_
             cursor.execute(f"SELECT COUNT(*) as cnt FROM leads l LEFT JOIN lead_status ls ON l.status_id = ls.status_id WHERE 1=1 {cond} AND ls.status_name = 'Deal Closed'", tuple(params))
             deal_closed = cursor.fetchone()['cnt']
             
+            # Pipeline
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM leads l LEFT JOIN lead_status ls ON l.status_id = ls.status_id WHERE 1=1 {cond} AND ls.status_name = 'Pipeline'", tuple(params))
+            pipeline = cursor.fetchone()['cnt']
+
             # Calls Attempted (Requires joining call_log with leads using project filter if needed)
             call_cond = ""
             call_params = []
@@ -915,6 +922,17 @@ def get_monthly_performance_report(target_month=None, target_year=None, project_
                 GROUP BY l.emp_id
             """)
             hist_visit_map = {row['emp_id']: row for row in cursor.fetchall()}
+
+            # Per-employee pipeline count
+            cursor.execute(f"""
+                SELECT l.emp_id, COUNT(*) as pipeline_count
+                FROM leads l
+                LEFT JOIN lead_status ls ON l.status_id = ls.status_id
+                WHERE MONTH(l.created_on) = {m} AND YEAR(l.created_on) = {y}
+                  AND ls.status_name = 'Pipeline'
+                GROUP BY l.emp_id
+            """)
+            emp_pipeline_map = {row['emp_id']: row['pipeline_count'] for row in cursor.fetchall()}
             
             call_stats_query = f"""
                 SELECT e.emp_id, COUNT(c.call_id) as calls_attempted
@@ -938,7 +956,8 @@ def get_monthly_performance_report(target_month=None, target_year=None, project_
                     "leads_received": stat['leads_received'] or 0,
                     "site_visits": int(hist.get('site_visits') or 0),
                     "deals_closed": int(hist.get('deals_closed') or 0),
-                    "calls_attempted": emp_call_stats.get(emp_id, 0)
+                    "calls_attempted": emp_call_stats.get(emp_id, 0),
+                    "pipeline": emp_pipeline_map.get(emp_id, 0)
                 }
 
             return {
@@ -951,7 +970,8 @@ def get_monthly_performance_report(target_month=None, target_year=None, project_
                     "walkins": walkins,
                     "mcube": mcube,
                     "calls_attempted": calls_attempted,
-                    "deal_closed": deal_closed
+                    "deal_closed": deal_closed,
+                    "pipeline": pipeline
                 },
                 "individuals": individuals
             }
@@ -1008,6 +1028,269 @@ def get_monthly_performance_report(target_month=None, target_year=None, project_
             cursor.close()
         if 'conn' in locals() and conn:
             conn.close()
+
+def get_weekly_performance_report(project_id=None):
+    """Fetches performance stats for the last 7 days (current) vs previous 7 days (previous)."""
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+        
+        base_cond = " AND l.is_active = 1 "
+        params = []
+        if project_id:
+            base_cond += " AND l.project_id = %s "
+            params.append(project_id)
+            
+        def get_aggregates(days_back_start, days_back_end):
+            cond = base_cond + f" AND DATE(l.created_on) <= CURDATE() - INTERVAL {days_back_start} DAY AND DATE(l.created_on) > CURDATE() - INTERVAL {days_back_end} DAY "
+            
+            # Overall leads
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM leads l WHERE 1=1 {cond}", tuple(params))
+            total_leads = cursor.fetchone()['cnt']
+
+            # Deal Closed
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM leads l LEFT JOIN lead_status ls ON l.status_id = ls.status_id WHERE 1=1 {cond} AND ls.status_name = 'Deal Closed'", tuple(params))
+            deal_closed = cursor.fetchone()['cnt']
+            
+            # Pipeline
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM leads l LEFT JOIN lead_status ls ON l.status_id = ls.status_id WHERE 1=1 {cond} AND ls.status_name = 'Pipeline'", tuple(params))
+            pipeline = cursor.fetchone()['cnt']
+
+            # Immutable site_visits and deals_closed from history
+            cursor.execute(f"""
+                SELECT SUM(CASE WHEN ns.status_name = 'Site Visit Done' THEN 1 ELSE 0 END) as site_visits
+                FROM lead_status_history h
+                JOIN leads l ON h.lead_id = l.lead_id
+                JOIN lead_status ns ON h.new_status_id = ns.status_id
+                WHERE DATE(h.changed_at) <= CURDATE() - INTERVAL {days_back_start} DAY
+                  AND DATE(h.changed_at) > CURDATE() - INTERVAL {days_back_end} DAY
+                  AND ns.status_name = 'Site Visit Done'
+            """)
+            site_visits = cursor.fetchone()['site_visits'] or 0
+
+            # Calls Attempted
+            call_cond = ""
+            call_params = []
+            if project_id:
+                call_cond += " AND l.project_id = %s "
+                call_params.append(project_id)
+                
+            cursor.execute(f"""
+                SELECT COUNT(*) as cnt 
+                FROM call_log c 
+                LEFT JOIN leads l ON c.lead_id = l.lead_id 
+                WHERE DATE(c.created_at) <= CURDATE() - INTERVAL {days_back_start} DAY 
+                  AND DATE(c.created_at) > CURDATE() - INTERVAL {days_back_end} DAY 
+                {call_cond}
+            """, tuple(call_params))
+            calls_attempted = cursor.fetchone()['cnt']
+            
+            # --- INDIVIDUAL QUERIES ---
+            cursor.execute(f"""
+                SELECT e.emp_id, e.emp_first_name,
+                       COUNT(l.lead_id) as leads_received
+                FROM employee e
+                LEFT JOIN leads l ON e.emp_id = l.emp_id AND DATE(l.created_on) <= CURDATE() - INTERVAL {days_back_start} DAY AND DATE(l.created_on) > CURDATE() - INTERVAL {days_back_end} DAY
+                WHERE e.emp_status = 'Active'
+                GROUP BY e.emp_id
+            """)
+            emp_stats = cursor.fetchall()
+            
+            cursor.execute(f"""
+                SELECT l.emp_id, SUM(CASE WHEN ns.status_name = 'Site Visit Done' THEN 1 ELSE 0 END) as site_visits, SUM(CASE WHEN ns.status_name = 'Deal Closed' THEN 1 ELSE 0 END) as deals_closed
+                FROM lead_status_history h
+                JOIN leads l ON h.lead_id = l.lead_id
+                JOIN lead_status ns ON h.new_status_id = ns.status_id
+                WHERE DATE(h.changed_at) <= CURDATE() - INTERVAL {days_back_start} DAY
+                  AND DATE(h.changed_at) > CURDATE() - INTERVAL {days_back_end} DAY
+                  AND ns.status_name IN ('Site Visit Done', 'Deal Closed')
+                GROUP BY l.emp_id
+            """)
+            hist_visit_map = {row['emp_id']: row for row in cursor.fetchall()}
+
+            cursor.execute(f"""
+                SELECT l.emp_id, COUNT(*) as pipeline_count
+                FROM leads l
+                LEFT JOIN lead_status ls ON l.status_id = ls.status_id
+                WHERE DATE(l.created_on) <= CURDATE() - INTERVAL {days_back_start} DAY
+                  AND DATE(l.created_on) > CURDATE() - INTERVAL {days_back_end} DAY
+                  AND ls.status_name = 'Pipeline'
+                GROUP BY l.emp_id
+            """)
+            emp_pipeline_map = {row['emp_id']: row['pipeline_count'] for row in cursor.fetchall()}
+            
+            call_stats_query = f"""
+                SELECT e.emp_id, COUNT(c.call_id) as calls_attempted
+                FROM employee e
+                LEFT JOIN call_log c ON e.emp_id = c.emp_id AND DATE(c.created_at) <= CURDATE() - INTERVAL {days_back_start} DAY AND DATE(c.created_at) > CURDATE() - INTERVAL {days_back_end} DAY
+                LEFT JOIN leads l ON c.lead_id = l.lead_id
+                WHERE e.emp_status = 'Active' {call_cond}
+                GROUP BY e.emp_id
+            """
+            cursor.execute(call_stats_query, tuple(call_params))
+            emp_call_stats = {row['emp_id']: row['calls_attempted'] for row in cursor.fetchall()}
+            
+            individuals = {}
+            for stat in emp_stats:
+                emp_id = stat['emp_id']
+                if not emp_id: continue
+                hist = hist_visit_map.get(emp_id, {})
+                individuals[emp_id] = {
+                    "name": str(stat['emp_first_name']).upper(),
+                    "leads_received": stat['leads_received'] or 0,
+                    "site_visits": int(hist.get('site_visits') or 0),
+                    "deals_closed": int(hist.get('deals_closed') or 0),
+                    "calls_attempted": emp_call_stats.get(emp_id, 0),
+                    "pipeline": emp_pipeline_map.get(emp_id, 0)
+                }
+
+            return {
+                "overall": {
+                    "leads_received": total_leads,
+                    "site_visits": site_visits,
+                    "calls_attempted": calls_attempted,
+                    "deal_closed": deal_closed,
+                    "pipeline": pipeline
+                },
+                "individuals": individuals
+            }
+
+        curr_data = get_aggregates(0, 7)
+        prev_data = get_aggregates(7, 14)
+        
+        return {"success": True, "data": {"current": curr_data, "previous": prev_data}}
+    except Exception as e:
+        import traceback
+        print(f"Error in get_weekly_performance_report: {traceback.format_exc()}")
+        return {"success": False, "message": str(e)}
+    finally:
+        if 'cursor' in locals() and cursor: cursor.close()
+        if 'conn' in locals() and conn: conn.close()
+
+
+def get_annual_performance_report(year, project_id=None):
+    """Fetches performance stats for a given year vs previous year."""
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+        
+        base_cond = " AND l.is_active = 1 "
+        params = []
+        if project_id:
+            base_cond += " AND l.project_id = %s "
+            params.append(project_id)
+            
+        def get_aggregates_annual(y):
+            cond = base_cond + f" AND YEAR(l.created_on) = {y} "
+            
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM leads l WHERE 1=1 {cond}", tuple(params))
+            total_leads = cursor.fetchone()['cnt']
+
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM leads l LEFT JOIN lead_status ls ON l.status_id = ls.status_id WHERE 1=1 {cond} AND ls.status_name = 'Deal Closed'", tuple(params))
+            deal_closed = cursor.fetchone()['cnt']
+            
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM leads l LEFT JOIN lead_status ls ON l.status_id = ls.status_id WHERE 1=1 {cond} AND ls.status_name = 'Pipeline'", tuple(params))
+            pipeline = cursor.fetchone()['cnt']
+
+            cursor.execute(f"""
+                SELECT SUM(CASE WHEN ns.status_name = 'Site Visit Done' THEN 1 ELSE 0 END) as site_visits
+                FROM lead_status_history h
+                JOIN leads l ON h.lead_id = l.lead_id
+                JOIN lead_status ns ON h.new_status_id = ns.status_id
+                WHERE YEAR(h.changed_at) = {y} AND ns.status_name = 'Site Visit Done'
+            """)
+            site_visits = cursor.fetchone()['site_visits'] or 0
+
+            call_cond = ""
+            call_params = []
+            if project_id:
+                call_cond += " AND l.project_id = %s "
+                call_params.append(project_id)
+                
+            cursor.execute(f"""
+                SELECT COUNT(*) as cnt 
+                FROM call_log c 
+                LEFT JOIN leads l ON c.lead_id = l.lead_id 
+                WHERE YEAR(c.created_at) = {y} {call_cond}
+            """, tuple(call_params))
+            calls_attempted = cursor.fetchone()['cnt']
+            
+            cursor.execute(f"""
+                SELECT e.emp_id, e.emp_first_name, COUNT(l.lead_id) as leads_received
+                FROM employee e
+                LEFT JOIN leads l ON e.emp_id = l.emp_id AND YEAR(l.created_on) = {y}
+                WHERE e.emp_status = 'Active'
+                GROUP BY e.emp_id
+            """)
+            emp_stats = cursor.fetchall()
+            
+            cursor.execute(f"""
+                SELECT l.emp_id, SUM(CASE WHEN ns.status_name = 'Site Visit Done' THEN 1 ELSE 0 END) as site_visits, SUM(CASE WHEN ns.status_name = 'Deal Closed' THEN 1 ELSE 0 END) as deals_closed
+                FROM lead_status_history h
+                JOIN leads l ON h.lead_id = l.lead_id
+                JOIN lead_status ns ON h.new_status_id = ns.status_id
+                WHERE YEAR(h.changed_at) = {y} AND ns.status_name IN ('Site Visit Done', 'Deal Closed')
+                GROUP BY l.emp_id
+            """)
+            hist_visit_map = {row['emp_id']: row for row in cursor.fetchall()}
+
+            cursor.execute(f"""
+                SELECT l.emp_id, COUNT(*) as pipeline_count
+                FROM leads l
+                LEFT JOIN lead_status ls ON l.status_id = ls.status_id
+                WHERE YEAR(l.created_on) = {y} AND ls.status_name = 'Pipeline'
+                GROUP BY l.emp_id
+            """)
+            emp_pipeline_map = {row['emp_id']: row['pipeline_count'] for row in cursor.fetchall()}
+            
+            call_stats_query = f"""
+                SELECT e.emp_id, COUNT(c.call_id) as calls_attempted
+                FROM employee e
+                LEFT JOIN call_log c ON e.emp_id = c.emp_id AND YEAR(c.created_at) = {y}
+                LEFT JOIN leads l ON c.lead_id = l.lead_id
+                WHERE e.emp_status = 'Active' {call_cond}
+                GROUP BY e.emp_id
+            """
+            cursor.execute(call_stats_query, tuple(call_params))
+            emp_call_stats = {row['emp_id']: row['calls_attempted'] for row in cursor.fetchall()}
+            
+            individuals = {}
+            for stat in emp_stats:
+                emp_id = stat['emp_id']
+                if not emp_id: continue
+                hist = hist_visit_map.get(emp_id, {})
+                individuals[emp_id] = {
+                    "name": str(stat['emp_first_name']).upper(),
+                    "leads_received": stat['leads_received'] or 0,
+                    "site_visits": int(hist.get('site_visits') or 0),
+                    "deals_closed": int(hist.get('deals_closed') or 0),
+                    "calls_attempted": emp_call_stats.get(emp_id, 0),
+                    "pipeline": emp_pipeline_map.get(emp_id, 0)
+                }
+
+            return {
+                "overall": {
+                    "leads_received": total_leads,
+                    "site_visits": site_visits,
+                    "calls_attempted": calls_attempted,
+                    "deal_closed": deal_closed,
+                    "pipeline": pipeline
+                },
+                "individuals": individuals
+            }
+
+        curr_data = get_aggregates_annual(year)
+        prev_data = get_aggregates_annual(year - 1)
+        
+        return {"success": True, "data": {"year": year, "prev_year": year - 1, "current": curr_data, "previous": prev_data}}
+    except Exception as e:
+        import traceback
+        print(f"Error in get_annual_performance_report: {traceback.format_exc()}")
+        return {"success": False, "message": str(e)}
+    finally:
+        if 'cursor' in locals() and cursor: cursor.close()
+        if 'conn' in locals() and conn: conn.close()
+
 
 
 def get_daily_site_visits():
