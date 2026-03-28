@@ -3,6 +3,8 @@ from db import get_db
 from services.reports_service import (
     get_reports_summary, 
     get_monthly_performance_report,
+    get_weekly_performance_report,
+    get_annual_performance_report,
     get_daily_site_visits,
     get_daily_calls_and_fresh_leads
 )
@@ -211,82 +213,106 @@ def send_site_visit_reminders(reminder_type):
             conn.close()
 
 
+def _row(bold_label, value, prev_label='', prev_value=None):
+    """Generates a consistent row: bold label + value, optional previous month note."""
+    prev_note = f'<br><span style="color:#888;font-size:0.88em;">({prev_label}: {prev_value})</span>' if prev_value is not None else ''
+    return (
+        f'<p style="margin:6px 0;">'
+        f'<strong>{bold_label}</strong>&nbsp;&nbsp;{value}'
+        f'{prev_note}</p>'
+    )
+
+
+def _individual_block(name, curr, prev=None, period_label=''):
+    """Generates a per-employee block in the WhatsApp style."""
+    def _line(label, curr_val, prev_val=None):
+        if prev_val is not None and period_label:
+            return (f'<p style="margin:3px 0 3px 12px;">{label}:&nbsp;&nbsp;{curr_val}'
+                    f'<br><span style="color:#888;font-size:0.88em;">({period_label}: {prev_val})</span></p>')
+        return f'<p style="margin:3px 0 3px 12px;">{label}:&nbsp;&nbsp;{curr_val}</p>'
+
+    p = prev or {}
+    block = f'<p style="margin:14px 0 4px 0;"><strong>{name}</strong></p>'
+    block += _line('Leads received', curr.get('leads_received', 0), p.get('leads_received'))
+    block += _line('Site Visit Done', curr.get('site_visits', 0), p.get('site_visits'))
+    block += _line('Calls attempted', curr.get('calls_attempted', 0), p.get('calls_attempted'))
+    block += _line('Pipeline', curr.get('pipeline', 0), p.get('pipeline'))
+    block += _line('DEAL CLOSED', curr.get('deals_closed', 0), p.get('deals_closed'))
+    return block
+
+
+def _html_wrap(title, subtitle, body):
+    """Wraps body in a consistent header and footer."""
+    year = datetime.now().year
+    return f"""
+<html><body style="font-family:Arial,sans-serif;color:#333;max-width:650px;margin:auto;">
+<div style="background:#1976d2;color:white;padding:20px;text-align:center;border-radius:6px 6px 0 0;">
+  <h2 style="margin:0;">{title}</h2>
+  <p style="margin:4px 0 0;font-size:0.95em;">{subtitle}</p>
+</div>
+<div style="padding:20px;border:1px solid #e0e0e0;border-top:none;">
+{body}
+</div>
+<div style="background:#f2f2f2;padding:8px;text-align:center;font-size:0.8em;color:#888;">
+  &copy; {year} CRM Automated Reporting System
+</div>
+</body></html>
+"""
+
+
 def send_weekly_report():
     print(f"Running Weekly Report Job at {datetime.now()}")
     try:
-        # Last 7 days
         end_date = datetime.now().strftime('%Y-%m-%d')
         start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-        
-        summary_res = get_reports_summary(start_date, end_date)
-        if not summary_res['success']:
-            print("Failed to fetch summary for weekly report.")
+
+        res = get_weekly_performance_report()
+        if not res['success']:
+            print("Failed to fetch weekly performance data.")
             return
 
-        data = summary_res['data']
-        html_content = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; color: #333;">
-            <div style="background-color: #1976d2; color: white; padding: 20px; text-align: center;">
-                <h2>Weekly Performance Report</h2>
-                <p>{start_date} to {end_date}</p>
-            </div>
-            <div style="padding: 20px;">
-                <h3>Overall Summary</h3>
-                <table style="width: 100%; border-collapse: collapse;">
-                    <tr style="background-color: #f2f2f2;">
-                        <th style="border: 1px solid #ddd; padding: 12px; text-align: left;">Metric</th>
-                        <th style="border: 1px solid #ddd; padding: 12px; text-align: left;">Count</th>
-                    </tr>
-                    <tr>
-                        <td style="border: 1px solid #ddd; padding: 12px;">Total Leads</td>
-                        <td style="border: 1px solid #ddd; padding: 12px;">{data['total_leads']}</td>
-                    </tr>
-                    <tr>
-                        <td style="border: 1px solid #ddd; padding: 12px;">Active Leads</td>
-                        <td style="border: 1px solid #ddd; padding: 12px;">{data['active_leads']}</td>
-                    </tr>
-                    <tr>
-                        <td style="border: 1px solid #ddd; padding: 12px;">Deals Closed</td>
-                        <td style="border: 1px solid #ddd; padding: 12px;">{data['closed_leads']}</td>
-                    </tr>
-                    <tr>
-                        <td style="border: 1px solid #ddd; padding: 12px;">Spam/Lost</td>
-                        <td style="border: 1px solid #ddd; padding: 12px;">{data['lost_leads']}</td>
-                    </tr>
-                </table>
-                <p style="margin-top: 20px; font-size: 0.9em; color: #666;">
-                    For detailed employee performance and logs, please log in to the CRM dashboard.
-                </p>
-            </div>
-            <div style="background-color: #f2f2f2; padding: 10px; text-align: center; font-size: 0.8em; color: #888;">
-                &copy; {datetime.now().year} CRM Automated Reporting System
-            </div>
-        </body>
-        </html>
-        """
-        
-        emails = get_admin_emails()
+        data = res['data']
+        curr_overall = data['current']['overall']
+        curr_indiv = data['current']['individuals']
+
+        date_range = f"{start_date} to {end_date}"
+
+        body = f'<p style="font-size:1em;"><strong>Please find the Weekly Report ({date_range})</strong></p>'
+        body += '<hr style="border:none;border-top:1px solid #eee;">'
+        body += '<p><strong>OVERALL</strong></p>'
+        body += _row('*Leads Received:*', curr_overall.get('leads_received', 0))
+        body += _row('*Site Visit Done:*', curr_overall.get('site_visits', 0))
+        body += _row('*Pipeline:*', curr_overall.get('pipeline', curr_overall.get('deal_closed', 0)))
+        body += _row('*Calls attempted:*', curr_overall.get('calls_attempted', 0))
+        body += _row('*DEAL CLOSED:*', curr_overall.get('deal_closed', 0))
+
+        if curr_indiv:
+            body += '<hr style="border:none;border-top:1px solid #eee; margin-top:16px;">'
+            body += '<p><strong>Each Individual Performance:</strong></p>'
+            for emp_id, ic in curr_indiv.items():
+                body += _individual_block(ic['name'], ic)
+
+        html = _html_wrap('Weekly Performance Report', date_range, body)
+        emails = get_admin_and_manager_emails()
         for email in emails:
-            send_html_email(email, f"Weekly Performance Report ({start_date} - {end_date})", html_content)
-        print(f"Weekly Report sent to {len(emails)} admins.")
-    except Exception as e:
+            send_html_email(email, f"Weekly Performance Report ({date_range})", html)
+        print(f"Weekly Report sent to {len(emails)} recipients.")
+    except Exception:
         print(f"Error in send_weekly_report job: {traceback.format_exc()}")
+
 
 def send_monthly_report():
     print(f"Running Monthly Report Job at {datetime.now()}")
     try:
         now = datetime.now()
-        # If it's the 1st of the month, we pull for the previous month (the one that just ended)
-        # Otherwise (like on the last day of the month), we pull for the current month
         if now.day == 1:
             target_date = now - timedelta(days=1)
         else:
             target_date = now
-            
+
         month = target_date.month
         year = target_date.year
-        
+
         report_res = get_monthly_performance_report(month, year)
         if not report_res['success']:
             print("Failed to fetch monthly report data.")
@@ -295,88 +321,58 @@ def send_monthly_report():
         data = report_res['data']
         curr = data['current']['overall']
         prev = data['previous']['overall']
-        
-        html_content = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; color: #333;">
-            <div style="background-color: #1976d2; color: white; padding: 20px; text-align: center;">
-                <h2>Monthly Performance Report</h2>
-                <p>{data['month_name']} {data['year']}</p>
-            </div>
-            <div style="padding: 20px;">
-                <h3>Overall Statistics</h3>
-                <table style="width: 100%; border-collapse: collapse; font-size: 0.95em;">
-                    <tr style="background-color: #f2f2f2;">
-                        <th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Metric</th>
-                        <th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Current ({data['month_name']})</th>
-                        <th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Previous ({data['prev_month_name']})</th>
-                    </tr>
-                    <tr>
-                        <td style="border: 1px solid #ddd; padding: 10px;">Leads Received</td>
-                        <td style="border: 1px solid #ddd; padding: 10px;">{curr['leads_received']}</td>
-                        <td style="border: 1px solid #ddd; padding: 10px;">{prev['leads_received']}</td>
-                    </tr>
-                    <tr>
-                        <td style="border: 1px solid #ddd; padding: 10px;">Site Visits</td>
-                        <td style="border: 1px solid #ddd; padding: 10px;">{curr['site_visits']}</td>
-                        <td style="border: 1px solid #ddd; padding: 10px;">{prev['site_visits']}</td>
-                    </tr>
-                    <tr>
-                        <td style="border: 1px solid #ddd; padding: 10px;">Calls Attempted</td>
-                        <td style="border: 1px solid #ddd; padding: 10px;">{curr['calls_attempted']}</td>
-                        <td style="border: 1px solid #ddd; padding: 10px;">{prev['calls_attempted']}</td>
-                    </tr>
-                    <tr>
-                        <td style="border: 1px solid #ddd; padding: 10px;">Deals Closed</td>
-                        <td style="border: 1px solid #ddd; padding: 10px;">{curr['deal_closed']}</td>
-                        <td style="border: 1px solid #ddd; padding: 10px;">{prev['deal_closed']}</td>
-                    </tr>
-                </table>
+        curr_indiv = data['current']['individuals']
+        prev_indiv = data['previous']['individuals']
+        month_name = data['month_name']
+        prev_month_name = data['prev_month_name']
+        yr = data['year']
+        prev_label = f"{prev_month_name} month"
 
-                <h3 style="margin-top: 25px;">Highlights</h3>
-                <div style="background-color: #f9f9f9; border-left: 5px solid #4caf50; padding: 10px; margin-bottom: 10px;">
-                    <strong>Good Performance:</strong><br/>
-                    - Highest calls: {data['highlights']['highest_calls']['count']} by {data['highlights']['highest_calls']['name']}<br/>
-                    - Highest site visits: {data['highlights']['highest_visits']['count']} by {data['highlights']['highest_visits']['name']}
-                </div>
-                <div style="background-color: #f9f9f9; border-left: 5px solid #f44336; padding: 10px;">
-                    <strong>Needs Improvement:</strong><br/>
-                    - Lowest calls: {data['highlights']['lowest_calls']['count']} by {data['highlights']['lowest_calls']['name']}<br/>
-                    - Lowest site visits: {data['highlights']['lowest_visits']['count']} by {data['highlights']['lowest_visits']['name']}
-                </div>
-            </div>
-            <div style="background-color: #f2f2f2; padding: 10px; text-align: center; font-size: 0.8em; color: #888;">
-                Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-            </div>
-        </body>
-        </html>
-        """
-        
-        emails = get_admin_emails()
+        body = f'<p style="font-size:1em;"><strong>Please find the {month_name} {yr} monthly report (TG)</strong></p>'
+        body += '<hr style="border:none;border-top:1px solid #eee;">'
+        body += '<p><strong>OVERALL</strong></p>'
+        body += _row('*Leads Received:*', curr.get('leads_received', 0), prev_label, prev.get('leads_received', 0))
+        body += _row('*Test Leads:*', curr.get('test_leads', 0), prev_label, prev.get('test_leads', 0))
+        body += _row('*Site Visit Done:*', curr.get('site_visits', 0), prev_label, prev.get('site_visits', 0))
+        body += _row('*Not Enquired/Spam:*', curr.get('spam', 0), prev_label, prev.get('spam', 0))
+        body += _row('*Not Interested:*', curr.get('not_interested', 0), prev_label, prev.get('not_interested', 0))
+        body += _row('*Walk-ins (incl digital):*', curr.get('walkins', 0), prev_label, prev.get('walkins', 0))
+        body += _row('*mcube (IVR):*', curr.get('mcube', 0), prev_label, prev.get('mcube', 0))
+        body += _row('*Calls attempted:*', curr.get('calls_attempted', 0), prev_label, prev.get('calls_attempted', 0))
+        body += _row('*Pipeline:*', curr.get('pipeline', 0), prev_label, prev.get('pipeline', 0))
+        body += _row('*DEAL CLOSED:*', curr.get('deal_closed', 0), prev_label, prev.get('deal_closed', 0))
+
+        if curr_indiv:
+            body += '<hr style="border:none;border-top:1px solid #eee; margin-top:16px;">'
+            body += '<p><strong>Each Individual Performance:</strong></p>'
+            for emp_id, ic in curr_indiv.items():
+                pc = prev_indiv.get(emp_id, {})
+                body += _individual_block(ic['name'], ic, pc, prev_label)
+
+        html = _html_wrap('Monthly Performance Report', f"{month_name} {yr}", body)
+        emails = get_admin_and_manager_emails()
         for email in emails:
-            send_html_email(email, f"Monthly Performance Report - {data['month_name']} {data['year']}", html_content)
-        print(f"Monthly Report sent to {len(emails)} admins.")
-    except Exception as e:
+            send_html_email(email, f"Monthly Performance Report - {month_name} {yr}", html)
+        print(f"Monthly Report sent to {len(emails)} recipients.")
+    except Exception:
         print(f"Error in send_monthly_report job: {traceback.format_exc()}")
+
 
 def send_quarterly_report():
     print(f"Running Quarterly Report Job at {datetime.now()}")
     try:
         now = datetime.now()
-        # Find start of current quarter
         curr_quarter = (now.month - 1) // 3 + 1
-        
-        # If it's the first day of a month following a quarter end, we pull for the previous quarter
+
         if now.day == 1 and now.month in [1, 4, 7, 10]:
             target_quarter = curr_quarter - 1 if curr_quarter > 1 else 4
             target_year = now.year if curr_quarter > 1 else now.year - 1
         else:
             target_quarter = curr_quarter
             target_year = now.year
-            
+
         q_start_month = (target_quarter - 1) * 3 + 1
         start_date = datetime(target_year, q_start_month, 1).strftime('%Y-%m-%d')
-        # End date is start of next quarter minus 1 day
         if target_quarter < 4:
             end_date = (datetime(target_year, q_start_month + 3, 1) - timedelta(days=1)).strftime('%Y-%m-%d')
         else:
@@ -387,81 +383,66 @@ def send_quarterly_report():
             return
 
         data = summary_res['data']
-        html_content = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; color: #333;">
-            <div style="background-color: #1976d2; color: white; padding: 20px; text-align: center;">
-                <h2>Quarterly Performance Report</h2>
-                <p>Q{target_quarter} {target_year} ({start_date} to {end_date})</p>
-            </div>
-            <div style="padding: 20px;">
-                <h3>Quarterly Summary</h3>
-                <table style="width: 100%; border-collapse: collapse;">
-                    <tr style="background-color: #f2f2f2;">
-                        <th style="border: 1px solid #ddd; padding: 12px; text-align: left;">Metric</th>
-                        <th style="border: 1px solid #ddd; padding: 12px; text-align: left;">Count</th>
-                    </tr>
-                    <tr><td style="border: 1px solid #ddd; padding: 12px;">Total Leads</td><td style="border: 1px solid #ddd; padding: 12px;">{data['total_leads']}</td></tr>
-                    <tr><td style="border: 1px solid #ddd; padding: 12px;">Active Leads</td><td style="border: 1px solid #ddd; padding: 12px;">{data['active_leads']}</td></tr>
-                    <tr><td style="border: 1px solid #ddd; padding: 12px;">Deals Closed</td><td style="border: 1px solid #ddd; padding: 12px;">{data['closed_leads']}</td></tr>
-                </table>
-            </div>
-        </body>
-        </html>
-        """
-        emails = get_admin_emails()
+        period_label = f"Q{target_quarter} {target_year} ({start_date} to {end_date})"
+
+        body = f'<p style="font-size:1em;"><strong>Please find the Quarterly Report – {period_label}</strong></p>'
+        body += '<hr style="border:none;border-top:1px solid #eee;">'
+        body += '<p><strong>OVERALL</strong></p>'
+        body += _row('*Leads Received:*', data.get('total_leads', 0))
+        body += _row('*Active Leads:*', data.get('active_leads', 0))
+        body += _row('*DEAL CLOSED:*', data.get('closed_leads', 0))
+
+        html = _html_wrap('Quarterly Performance Report', period_label, body)
+        emails = get_admin_and_manager_emails()
         for email in emails:
-            send_html_email(email, f"Quarterly Performance Report - Q{target_quarter} {target_year}", html_content)
-        print(f"Quarterly Report sent to {len(emails)} admins.")
-    except Exception as e:
+            send_html_email(email, f"Quarterly Performance Report - Q{target_quarter} {target_year}", html)
+        print(f"Quarterly Report sent to {len(emails)} recipients.")
+    except Exception:
         print(f"Error in send_quarterly_report job: {traceback.format_exc()}")
+
 
 def send_annual_report():
     print(f"Running Annual Report Job at {datetime.now()}")
     try:
         now = datetime.now()
-        # If it's Jan 1st, we pull for previous year
         if now.month == 1 and now.day == 1:
             target_year = now.year - 1
         else:
             target_year = now.year
-            
-        start_date = f"{target_year}-01-01"
-        end_date = f"{target_year}-12-31"
 
-        summary_res = get_reports_summary(start_date, end_date)
-        if not summary_res['success']:
+        res = get_annual_performance_report(target_year)
+        if not res['success']:
+            print("Failed to fetch annual data.")
             return
 
-        data = summary_res['data']
-        html_content = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; color: #333;">
-            <div style="background-color: #1976d2; color: white; padding: 20px; text-align: center;">
-                <h2>Annual Performance Report</h2>
-                <p>Year {target_year}</p>
-            </div>
-            <div style="padding: 20px;">
-                <h3>Annual Summary</h3>
-                <table style="width: 100%; border-collapse: collapse;">
-                    <tr style="background-color: #f2f2f2;">
-                        <th style="border: 1px solid #ddd; padding: 12px; text-align: left;">Metric</th>
-                        <th style="border: 1px solid #ddd; padding: 12px; text-align: left;">Count</th>
-                    </tr>
-                    <tr><td style="border: 1px solid #ddd; padding: 12px;">Total Leads</td><td style="border: 1px solid #ddd; padding: 12px;">{data['total_leads']}</td></tr>
-                    <tr><td style="border: 1px solid #ddd; padding: 12px;">Active Leads</td><td style="border: 1px solid #ddd; padding: 12px;">{data['active_leads']}</td></tr>
-                    <tr><td style="border: 1px solid #ddd; padding: 12px;">Deals Closed</td><td style="border: 1px solid #ddd; padding: 12px;">{data['closed_leads']}</td></tr>
-                </table>
-            </div>
-        </body>
-        </html>
-        """
-        emails = get_admin_emails()
+        data = res['data']
+        curr_overall = data['current']['overall']
+        curr_indiv = data['current']['individuals']
+        prev_overall = data['previous']['overall']
+        prev_year = data['prev_year']
+
+        body = f'<p style="font-size:1em;"><strong>Please find the Annual Report – {target_year}</strong></p>'
+        body += '<hr style="border:none;border-top:1px solid #eee;">'
+        body += '<p><strong>OVERALL</strong></p>'
+        body += _row('*Leads Received:*', curr_overall.get('leads_received', 0))
+        body += _row('*Site Visit Done:*', curr_overall.get('site_visits', 0))
+        body += _row('*Calls attempted:*', curr_overall.get('calls_attempted', 0))
+        body += _row('*DEAL CLOSED:*', curr_overall.get('deal_closed', 0))
+
+        if curr_indiv:
+            body += '<hr style="border:none;border-top:1px solid #eee; margin-top:16px;">'
+            body += '<p><strong>Each Individual Performance:</strong></p>'
+            for emp_id, ic in curr_indiv.items():
+                body += _individual_block(ic['name'], ic)
+
+        html = _html_wrap('Annual Performance Report', f"Year {target_year}", body)
+        emails = get_admin_and_manager_emails()
         for email in emails:
-            send_html_email(email, f"Annual Performance Report - {target_year}", html_content)
-        print(f"Annual Report sent to {len(emails)} admins.")
-    except Exception as e:
+            send_html_email(email, f"Annual Performance Report – {target_year}", html)
+        print(f"Annual Report sent to {len(emails)} recipients.")
+    except Exception:
         print(f"Error in send_annual_report job: {traceback.format_exc()}")
+
 
 def send_daily_site_visit_report():
     """Sent at 7:30 PM daily — shows today's Site Visit Done events."""
@@ -475,41 +456,24 @@ def send_daily_site_visit_report():
 
         visits = res['data']
         rows_html = ''.join([
-            f"""<tr>
-                <td style="border:1px solid #ddd;padding:10px;">{v['employee_name']}</td>
-                <td style="border:1px solid #ddd;padding:10px;">{v['lead_name']}</td>
-                <td style="border:1px solid #ddd;padding:10px;">{v['project_name']}</td>
-                <td style="border:1px solid #ddd;padding:10px;">{v['visit_time']}</td>
-            </tr>"""
+            f"""<p style="margin:4px 0;">
+                &bull; <strong>{v['lead_name']}</strong> ({v['employee_name']}) &mdash;
+                {v['project_name']} @ {v['visit_time']}
+            </p>"""
             for v in visits
-        ]) if visits else '<tr><td colspan="4" style="padding:12px;text-align:center;color:#888;">No site visits recorded today.</td></tr>'
+        ]) if visits else '<p style="color:#888;">No site visits recorded today.</p>'
 
-        html = f"""
-        <html><body style="font-family:Arial,sans-serif;color:#333;">
-        <div style="background:#1976d2;color:white;padding:20px;text-align:center;">
-            <h2>Daily Site Visit Report</h2><p>{today}</p>
-        </div>
-        <div style="padding:20px;">
-            <p><strong>Total Site Visits Today: {len(visits)}</strong></p>
-            <table style="width:100%;border-collapse:collapse;">
-                <tr style="background:#f2f2f2;">
-                    <th style="border:1px solid #ddd;padding:10px;text-align:left;">Executive</th>
-                    <th style="border:1px solid #ddd;padding:10px;text-align:left;">Lead</th>
-                    <th style="border:1px solid #ddd;padding:10px;text-align:left;">Project</th>
-                    <th style="border:1px solid #ddd;padding:10px;text-align:left;">Time</th>
-                </tr>
-                {rows_html}
-            </table>
-        </div>
-        <div style="background:#f2f2f2;padding:10px;text-align:center;font-size:0.8em;color:#888;">&copy; {datetime.now().year} CRM Automated Reporting</div>
-        </body></html>
-        """
+        body = f'<p><strong>Daily Site Visit Report – {today}</strong></p>'
+        body += f'<p><strong>Total Site Visits Today: {len(visits)}</strong></p>'
+        body += '<hr style="border:none;border-top:1px solid #eee;">'
+        body += rows_html
 
+        html = _html_wrap('Daily Site Visit Report', today, body)
         emails = get_admin_and_manager_emails()
         for email in emails:
             send_html_email(email, f"Daily Site Visit Report – {today}", html)
         print(f"Daily site visit report sent to {len(emails)} recipients.")
-    except Exception as e:
+    except Exception:
         print(f"Error in send_daily_site_visit_report: {traceback.format_exc()}")
 
 
@@ -527,56 +491,28 @@ def send_daily_eod_report():
         fresh_leads = data['fresh_leads']
         calls_by_emp = data['calls_by_employee']
 
-        calls_rows = ''.join([
-            f"<tr><td style='border:1px solid #ddd;padding:8px;'>{r['employee_name']}</td>"
-            f"<td style='border:1px solid #ddd;padding:8px;text-align:center;'>{r['calls_today']}</td></tr>"
-            for r in calls_by_emp
-        ]) if calls_by_emp else '<tr><td colspan="2" style="padding:10px;text-align:center;color:#888;">No calls recorded today.</td></tr>'
+        body = f'<p><strong>Daily End-of-Day Report – {today}</strong></p>'
+        body += '<hr style="border:none;border-top:1px solid #eee;">'
 
-        leads_rows = ''.join([
-            f"""<tr>
-                <td style='border:1px solid #ddd;padding:8px;'>{l['lead_name']}</td>
-                <td style='border:1px solid #ddd;padding:8px;'>{l['assigned_to']}</td>
-                <td style='border:1px solid #ddd;padding:8px;'>{l['project_name']}</td>
-                <td style='border:1px solid #ddd;padding:8px;'>{l['status_name'] or '-'}</td>
-            </tr>"""
-            for l in fresh_leads
-        ]) if fresh_leads else '<tr><td colspan="4" style="padding:10px;text-align:center;color:#888;">No new leads today.</td></tr>'
+        body += f'<p><strong>&#128222; Calls Attempted – Total: {data["total_calls"]}</strong></p>'
+        for r in calls_by_emp:
+            body += f'<p style="margin:3px 0 3px 12px;">{r["employee_name"]}:&nbsp;&nbsp;<strong>{r["calls_today"]}</strong></p>'
+        if not calls_by_emp:
+            body += '<p style="color:#888;margin-left:12px;">No calls recorded today.</p>'
 
-        html = f"""
-        <html><body style="font-family:Arial,sans-serif;color:#333;">
-        <div style="background:#1976d2;color:white;padding:20px;text-align:center;">
-            <h2>Daily End-of-Day Report</h2><p>{today}</p>
-        </div>
-        <div style="padding:20px;">
-            <h3>📞 Calls Attempted – Total: {data['total_calls']}</h3>
-            <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
-                <tr style="background:#f2f2f2;">
-                    <th style="border:1px solid #ddd;padding:8px;text-align:left;">Executive</th>
-                    <th style="border:1px solid #ddd;padding:8px;text-align:center;">Calls</th>
-                </tr>
-                {calls_rows}
-            </table>
-            <h3>🌱 Fresh Leads Today – Total: {data['fresh_leads_count']}</h3>
-            <table style="width:100%;border-collapse:collapse;">
-                <tr style="background:#f2f2f2;">
-                    <th style="border:1px solid #ddd;padding:8px;text-align:left;">Lead</th>
-                    <th style="border:1px solid #ddd;padding:8px;text-align:left;">Assigned To</th>
-                    <th style="border:1px solid #ddd;padding:8px;text-align:left;">Project</th>
-                    <th style="border:1px solid #ddd;padding:8px;text-align:left;">Status</th>
-                </tr>
-                {leads_rows}
-            </table>
-        </div>
-        <div style="background:#f2f2f2;padding:10px;text-align:center;font-size:0.8em;color:#888;">&copy; {datetime.now().year} CRM Automated Reporting</div>
-        </body></html>
-        """
+        body += f'<p style="margin-top:14px;"><strong>&#127807; Fresh Leads Today – Total: {data["fresh_leads_count"]}</strong></p>'
+        for l in fresh_leads:
+            body += (f'<p style="margin:3px 0 3px 12px;"><strong>{l["lead_name"]}</strong> '
+                     f'&mdash; {l["assigned_to"]} | {l["project_name"]} | {l["status_name"] or "New"}</p>')
+        if not fresh_leads:
+            body += '<p style="color:#888;margin-left:12px;">No new leads today.</p>'
 
+        html = _html_wrap('Daily End-of-Day Report', today, body)
         emails = get_admin_and_manager_emails()
         for email in emails:
             send_html_email(email, f"Daily EOD Report – {today}", html)
         print(f"Daily EOD report sent to {len(emails)} recipients.")
-    except Exception as e:
+    except Exception:
         print(f"Error in send_daily_eod_report: {traceback.format_exc()}")
 
 
@@ -617,12 +553,12 @@ def init_scheduler(app):
         # Fallback to 1st of Jan, Apr, Jul, Oct
         scheduler.add_job(id='quarterly_report', func=send_quarterly_report, trigger='cron', month='1,4,7,10', day=1, hour=0, minute=10)
 
-    # Annual: Dec 31st at 23:59
+    # Annual: March 31st at 23:59 (Financial Year End)
     try:
-        scheduler.add_job(id='annual_report', func=send_annual_report, trigger='cron', month=12, day='last', hour=23, minute=59)
+        scheduler.add_job(id='annual_report', func=send_annual_report, trigger='cron', month=3, day='last', hour=23, minute=59)
     except:
-        # Fallback to Jan 1st
-        scheduler.add_job(id='annual_report', func=send_annual_report, trigger='cron', month=1, day=1, hour=0, minute=15)
+        # Fallback to Apr 1st
+        scheduler.add_job(id='annual_report', func=send_annual_report, trigger='cron', month=4, day=1, hour=0, minute=15)
 
     scheduler.add_job(
         id='site_visit_reminder_two_days_before',
