@@ -11,7 +11,10 @@ def _serialize_datetime(value):
     """Return DB datetimes as plain local strings so frontend does not re-shift them."""
     if isinstance(value, datetime):
         return value.strftime('%Y-%m-%d %H:%M:%S')
+    if hasattr(value, 'strftime'):
+        return value.strftime('%Y-%m-%d %H:%M:%S')
     return value
+
 
 
 def to_frontend_format(backend_lead):
@@ -111,14 +114,14 @@ def create_lead():
 
         data = {
             'name':            req_data.get('name'),
-            'phone':           req_data.get('phone'),
+            'phone':           req_data.get('phone') or None,
             'email':           req_data.get('email'),
             'project':         req_data.get('project'),        # project_id
             'source':          req_data.get('source'),         # source_id
             'status':          req_data.get('status'),         # status_id
             'assigned_to':     req_data.get('assignedTo'),     # emp_id
             'description':     req_data.get('description'),
-            'alternate_phone': req_data.get('alternatePhone'),
+            'alternate_phone': req_data.get('alternatePhone') or None,
             'profession':      req_data.get('profession'),
         }
 
@@ -162,8 +165,8 @@ def update_lead(lead_id):
             'profession':      data.get('profession'),
         }
 
-        # Restrict fields for non-admins
-        if role != "ADMIN":
+        # Restrict fields only for sales executives; managers follow admin behavior
+        if role not in ["ADMIN", "SALES_MGR"]:
             update_data.pop("source", None)
             update_data.pop("assigned_to", None)
             

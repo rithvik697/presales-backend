@@ -18,8 +18,10 @@ def get_summary(decoded):
     end_date = request.args.get('endDate')
     project_id = request.args.get('projectId')
     user_id = request.args.get('userId')
+    source_id = request.args.get('sourceId')
+    status_id = request.args.get('statusId')
     
-    result = reports_service.get_reports_summary(start_date, end_date, project_id, user_id)
+    result = reports_service.get_reports_summary(start_date, end_date, project_id, user_id, source_id, status_id)
     if result.get("success"):
         return jsonify(result), 200
     return jsonify({"error": result.get("message")}), 500
@@ -34,8 +36,10 @@ def get_weekly(decoded):
     end_date = request.args.get('endDate')
     project_id = request.args.get('projectId')
     user_id = request.args.get('userId')
+    source_id = request.args.get('sourceId')
+    status_id = request.args.get('statusId')
     
-    result = reports_service.get_weekly_leads(start_date, end_date, project_id, user_id)
+    result = reports_service.get_weekly_leads(start_date, end_date, project_id, user_id, source_id, status_id)
     if result.get("success"):
         return jsonify(result), 200
     return jsonify({"error": result.get("message")}), 500
@@ -50,8 +54,26 @@ def get_monthly(decoded):
     end_date = request.args.get('endDate')
     project_id = request.args.get('projectId')
     user_id = request.args.get('userId')
+    source_id = request.args.get('sourceId')
+    status_id = request.args.get('statusId')
     
-    result = reports_service.get_monthly_leads(start_date, end_date, project_id, user_id)
+    result = reports_service.get_monthly_leads(start_date, end_date, project_id, user_id, source_id, status_id)
+    if result.get("success"):
+        return jsonify(result), 200
+    return jsonify({"error": result.get("message")}), 500
+
+@reports_bp.route('/daily', methods=['GET'])
+@token_required
+def get_daily(decoded):
+    if not is_authorized(decoded):
+        return jsonify({"message": "Unauthorized"}), 403
+        
+    project_id = request.args.get('projectId')
+    user_id = request.args.get('userId')
+    source_id = request.args.get('sourceId')
+    status_id = request.args.get('statusId')
+    
+    result = reports_service.get_daily_leads_hourly(project_id, user_id, source_id, status_id)
     if result.get("success"):
         return jsonify(result), 200
     return jsonify({"error": result.get("message")}), 500
@@ -66,8 +88,10 @@ def get_annual(decoded):
     end_date = request.args.get('endDate')
     project_id = request.args.get('projectId')
     user_id = request.args.get('userId')
+    source_id = request.args.get('sourceId')
+    status_id = request.args.get('statusId')
     
-    result = reports_service.get_annual_leads(start_date, end_date, project_id, user_id)
+    result = reports_service.get_annual_leads(start_date, end_date, project_id, user_id, source_id, status_id)
     if result.get("success"):
         return jsonify(result), 200
     return jsonify({"error": result.get("message")}), 500
@@ -82,8 +106,10 @@ def get_status_distribution(decoded):
     end_date = request.args.get('endDate')
     project_id = request.args.get('projectId')
     user_id = request.args.get('userId')
+    source_id = request.args.get('sourceId')
+    status_id = request.args.get('statusId')
     
-    result = reports_service.get_leads_by_status(start_date, end_date, project_id, user_id)
+    result = reports_service.get_leads_by_status(start_date, end_date, project_id, user_id, source_id, status_id)
     if result.get("success"):
         return jsonify(result), 200
     return jsonify({"error": result.get("message")}), 500
@@ -98,8 +124,10 @@ def get_user_performance(decoded):
     end_date = request.args.get('endDate')
     project_id = request.args.get('projectId')
     user_id = request.args.get('userId')
+    source_id = request.args.get('sourceId')
+    status_id = request.args.get('statusId')
     
-    result = reports_service.get_user_performance(start_date, end_date, project_id, user_id)
+    result = reports_service.get_user_performance(start_date, end_date, project_id, user_id, source_id, status_id)
     if result.get("success"):
         return jsonify(result), 200
     return jsonify({"error": result.get("message")}), 500
@@ -112,8 +140,10 @@ def get_daily_log(decoded):
         
     project_id = request.args.get('projectId')
     user_id = request.args.get('userId')
+    source_id = request.args.get('sourceId')
+    status_id = request.args.get('statusId')
     
-    result = reports_service.get_daily_log(project_id, user_id)
+    result = reports_service.get_daily_log(project_id, user_id, source_id, status_id)
     if result.get("success"):
         return jsonify(result), 200
     return jsonify({"error": result.get("message")}), 500
@@ -171,11 +201,13 @@ def export_user_leads(decoded):
     start_date = request.args.get('startDate')
     end_date = request.args.get('endDate')
     project_id = request.args.get('projectId')
+    source_id = request.args.get('sourceId')
+    status_id = request.args.get('statusId')
     
     if not emp_id or not activity:
         return jsonify({"error": "emp_id and activity are required"}), 400
         
-    result = reports_service.get_user_leads_export(emp_id, activity, start_date, end_date, project_id)
+    result = reports_service.get_user_leads_export(emp_id, activity, start_date, end_date, project_id, source_id, status_id)
     if not result.get("success"):
         return jsonify({"error": result.get("message")}), 500
         
@@ -216,11 +248,13 @@ def export_user_leads_json(decoded):
     start_date = request.args.get('startDate')
     end_date = request.args.get('endDate')
     project_id = request.args.get('projectId')
+    source_id = request.args.get('sourceId')
+    status_id = request.args.get('statusId')
     
     if not emp_id or not activity:
         return jsonify({"error": "emp_id and activity are required"}), 400
         
-    result = reports_service.get_user_leads_export(emp_id, activity, start_date, end_date, project_id)
+    result = reports_service.get_user_leads_export(emp_id, activity, start_date, end_date, project_id, source_id, status_id)
     if not result.get("success"):
         return jsonify({"error": result.get("message")}), 500
         
@@ -237,11 +271,13 @@ def summary_leads(decoded):
     end_date = request.args.get('endDate')
     project_id = request.args.get('projectId')
     user_id = request.args.get('userId')
+    source_id = request.args.get('sourceId')
+    status_id = request.args.get('statusId')
     
     if not summary_type:
         return jsonify({"error": "type is required"}), 400
         
-    result = reports_service.get_summary_leads(summary_type, start_date, end_date, project_id, user_id)
+    result = reports_service.get_summary_leads(summary_type, start_date, end_date, project_id, user_id, source_id, status_id)
     if not result.get("success"):
         return jsonify({"error": result.get("message")}), 500
         
@@ -257,8 +293,29 @@ def get_weekly_log(decoded):
     end_date = request.args.get('endDate')
     project_id = request.args.get('projectId')
     user_id = request.args.get('userId')
+    source_id = request.args.get('sourceId')
+    status_id = request.args.get('statusId')
     
-    result = reports_service.get_weekly_report_log(start_date, end_date, project_id, user_id)
+    result = reports_service.get_weekly_report_log(start_date, end_date, project_id, user_id, source_id, status_id)
+    if not result.get("success"):
+        return jsonify({"error": result.get("message")}), 500
+        
+    return jsonify(result), 200
+
+@reports_bp.route('/monthly-log', methods=['GET'])
+@token_required
+def get_monthly_log(decoded):
+    if not is_authorized(decoded):
+        return jsonify({"message": "Unauthorized"}), 403
+        
+    month = request.args.get('month')
+    year = request.args.get('year')
+    project_id = request.args.get('projectId')
+    user_id = request.args.get('userId')
+    source_id = request.args.get('sourceId')
+    status_id = request.args.get('statusId')
+    
+    result = reports_service.get_monthly_report_log(month, year, project_id, user_id, source_id, status_id)
     if not result.get("success"):
         return jsonify({"error": result.get("message")}), 500
         
@@ -278,4 +335,59 @@ def get_monthly_performance_report(decoded):
     if not result.get("success"):
         return jsonify({"error": result.get("message")}), 500
         
+    return jsonify(result), 200
+
+@reports_bp.route('/weekly-performance-report', methods=['GET'])
+@token_required
+def get_weekly_performance_report(decoded):
+    if not is_authorized(decoded):
+        return jsonify({"message": "Unauthorized"}), 403
+        
+    project_id = request.args.get('projectId')
+    
+    result = reports_service.get_weekly_performance_report(project_id)
+    if not result.get("success"):
+        return jsonify({"error": result.get("message")}), 500
+        
+    return jsonify(result), 200
+
+@reports_bp.route('/annual-performance-report', methods=['GET'])
+@token_required
+def get_annual_performance_report(decoded):
+    if not is_authorized(decoded):
+        return jsonify({"message": "Unauthorized"}), 403
+        
+    target_year = request.args.get('year')
+    project_id = request.args.get('projectId')
+    
+    result = reports_service.get_annual_performance_report(target_year, project_id)
+    if not result.get("success"):
+        return jsonify({"error": result.get("message")}), 500
+        
+    return jsonify(result), 200
+
+@reports_bp.route('/history-report', methods=['GET'])
+@token_required
+def get_history_report(decoded):
+    if not is_authorized(decoded):
+        return jsonify({"message": "Unauthorized"}), 403
+
+    status_type = request.args.get('type')  # 'site_visit' or 'deal_closed'
+    start_date = request.args.get('startDate')
+    end_date = request.args.get('endDate')
+    project_id = request.args.get('projectId')
+    user_id = request.args.get('userId')
+
+    status_map = {
+        'site_visit': 'Site Visit Done',
+        'deal_closed': 'Deal Closed'
+    }
+    status_name = status_map.get(status_type)
+    if not status_name:
+        return jsonify({"error": "type must be 'site_visit' or 'deal_closed'"}), 400
+
+    result = reports_service.get_immutable_history_report(status_name, start_date, end_date, project_id, user_id)
+    if not result.get("success"):
+        return jsonify({"error": result.get("message")}), 500
+
     return jsonify(result), 200

@@ -107,3 +107,4 @@ def get_comments_by_lead(lead_id):
     finally:
         cursor.close()
         conn.close()
+        
