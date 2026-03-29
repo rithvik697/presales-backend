@@ -2,6 +2,7 @@ from flask_apscheduler import APScheduler
 from db import get_db
 from services.reports_service import get_reports_summary, get_monthly_performance_report
 from services.email_service import send_html_email
+from services.report_email_service import get_recipients_for_report
 from services.notification_service import create_notification
 from datetime import datetime, timedelta
 import traceback
@@ -41,6 +42,14 @@ def get_admin_emails():
             cursor.close()
         if 'conn' in locals() and conn:
             conn.close()
+
+
+def get_report_emails(report_type):
+    """Get emails for a report type from config table, fallback to admin emails."""
+    emails = get_recipients_for_report(report_type)
+    if not emails:
+        emails = get_admin_emails()
+    return emails
 
 
 def test_report_job():
@@ -238,10 +247,10 @@ def send_weekly_report():
         </html>
         """
         
-        emails = get_admin_emails()
+        emails = get_report_emails("weekly_report")
         for email in emails:
             send_html_email(email, f"Weekly Performance Report ({start_date} - {end_date})", html_content)
-        print(f"Weekly Report sent to {len(emails)} admins.")
+        print(f"Weekly Report sent to {len(emails)} recipients.")
     except Exception as e:
         print(f"Error in send_weekly_report job: {traceback.format_exc()}")
 
@@ -324,10 +333,10 @@ def send_monthly_report():
         </html>
         """
         
-        emails = get_admin_emails()
+        emails = get_report_emails("monthly_report")
         for email in emails:
             send_html_email(email, f"Monthly Performance Report - {data['month_name']} {data['year']}", html_content)
-        print(f"Monthly Report sent to {len(emails)} admins.")
+        print(f"Monthly Report sent to {len(emails)} recipients.")
     except Exception as e:
         print(f"Error in send_monthly_report job: {traceback.format_exc()}")
 
@@ -381,10 +390,10 @@ def send_quarterly_report():
         </body>
         </html>
         """
-        emails = get_admin_emails()
+        emails = get_report_emails("quarterly_report")
         for email in emails:
             send_html_email(email, f"Quarterly Performance Report - Q{target_quarter} {target_year}", html_content)
-        print(f"Quarterly Report sent to {len(emails)} admins.")
+        print(f"Quarterly Report sent to {len(emails)} recipients.")
     except Exception as e:
         print(f"Error in send_quarterly_report job: {traceback.format_exc()}")
 
@@ -428,10 +437,10 @@ def send_annual_report():
         </body>
         </html>
         """
-        emails = get_admin_emails()
+        emails = get_report_emails("annual_report")
         for email in emails:
             send_html_email(email, f"Annual Performance Report - {target_year}", html_content)
-        print(f"Annual Report sent to {len(emails)} admins.")
+        print(f"Annual Report sent to {len(emails)} recipients.")
     except Exception as e:
         print(f"Error in send_annual_report job: {traceback.format_exc()}")
 

@@ -1,3 +1,4 @@
+import os
 from werkzeug.security import check_password_hash, generate_password_hash
 from db import get_db
 import logging
@@ -5,6 +6,7 @@ import jwt
 import datetime
 from config import PRIVATE_KEY, PUBLIC_KEY
 from services.email_service import send_reset_email
+from utils.validators import validate_password_strength
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +115,8 @@ class AuthService:
 
             token = jwt.encode(payload, PRIVATE_KEY, algorithm="RS256")
 
-            reset_link = f"http://localhost:4200/reset-password?token={token}"
+            frontend_url = os.getenv("FRONTEND_URL", "http://localhost:4200")
+            reset_link = f"{frontend_url}/reset-password?token={token}"
 
             send_reset_email(email, reset_link)
 
@@ -150,15 +153,31 @@ class AuthService:
         except jwt.InvalidTokenError:
             raise Exception("Invalid reset token")
 
+        valid, err = validate_password_strength(new_password)
+        if not valid:
+            raise ValueError(err)
+
         password_hash = generate_password_hash(
             new_password,
             method="scrypt"
         )
 
         db = get_db()
-        cursor = db.cursor()
+        cursor = db.cursor(dictionary=True)
 
         try:
+            cursor.execute(
+                "SELECT password_hash FROM employee WHERE emp_id = %s",
+                (emp_id,)
+            )
+            user = cursor.fetchone()
+
+            if not user:
+                raise Exception("User not found")
+
+            if check_password_hash(user["password_hash"], new_password):
+                raise ValueError("New password must be different from the current password")
+
             cursor.execute("""
                 UPDATE employee
                 SET password_hash=%s, must_change_password=0
@@ -193,11 +212,19 @@ class AuthService:
             user = cursor.fetchone()
 
             if not user:
-                return False
+                return False, "User not found"
 
             # verify old password
             if not check_password_hash(user["password_hash"], old_password):
-                return False
+                return False, "Current password is incorrect"
+
+            if old_password == new_password:
+                return False, "New password must be different from the current password"
+
+            # validate new password strength
+            valid, err = validate_password_strength(new_password)
+            if not valid:
+                return False, err
 
             # hash new password
             new_hash = generate_password_hash(new_password, method="scrypt")
@@ -209,11 +236,11 @@ class AuthService:
 
             db.commit()
 
-            return True
+            return True, None
 
         except Exception as e:
             logger.error(f"Change password error: {e}")
-            return False
+            return False, "An unexpected error occurred"
 
         finally:
             cursor.close()

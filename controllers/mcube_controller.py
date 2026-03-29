@@ -14,14 +14,15 @@ def _verify_mcube_key():
     """Verify the MCube API key from request header or query param."""
     expected_key = os.getenv("MCUBE_API_KEY")
     if not expected_key:
-        return True  # No key configured, allow (dev mode)
+        logger.warning("MCUBE_API_KEY not configured — rejecting request")
+        return False
 
     provided_key = (
         request.headers.get("X-API-Key")
         or request.args.get("api_key")
     )
 
-    return provided_key == expected_key
+    return provided_key and provided_key.strip() == expected_key.strip()
 
 
 @mcube_bp.route("/mcube-webhook", methods=["POST"])

@@ -24,6 +24,8 @@ user_controller_bp = Blueprint(
 @user_controller_bp.route('/users/register', methods=['POST'])
 @token_required
 def create_user(decoded):
+    if decoded.get("role_type") != "ADMIN":
+        return jsonify({"success": False, "error": "Admin access required"}), 403
 
     data = request.json
 
@@ -120,6 +122,8 @@ def fetch_user_by_id_controller(decoded, emp_id):
 @user_controller_bp.route('/users/<emp_id>', methods=['PUT'])
 @token_required
 def update_user_controller(decoded, emp_id):
+    if decoded.get("role_type") != "ADMIN":
+        return jsonify({"success": False, "error": "Admin access required"}), 403
 
     data = request.json
 
@@ -168,6 +172,8 @@ def update_user_controller(decoded, emp_id):
 @user_controller_bp.route('/users/<emp_id>/status', methods=['PUT'])
 @token_required
 def update_user_status_controller(decoded, emp_id):
+    if decoded.get("role_type") != "ADMIN":
+        return jsonify({"success": False, "error": "Admin access required"}), 403
 
     data = request.json
 
@@ -219,6 +225,8 @@ def update_user_status_controller(decoded, emp_id):
 @user_controller_bp.route('/users/<emp_id>', methods=['DELETE'])
 @token_required
 def delete_user(decoded, emp_id):
+    if decoded.get("role_type") != "ADMIN":
+        return jsonify({"success": False, "error": "Admin access required"}), 403
 
     try:
         current_user = decoded.get('username', 'ADMIN')

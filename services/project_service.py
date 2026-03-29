@@ -323,9 +323,51 @@ class ProjectService:
         finally:
             db.close()
 
+    # -----------------------------
+    # Delete Project
+    # -----------------------------
+    def delete_project(self, project_id, deleted_by="SYSTEM"):
+
+        db = get_db()
+        cursor = db.cursor(dictionary=True)
+
+        try:
+            cursor.execute(
+                "SELECT project_id, project_name FROM project_registration WHERE project_id = %s",
+                (project_id,)
+            )
+            project = cursor.fetchone()
+
+            if not project:
+                return False
+
+            cursor.execute(
+                "DELETE FROM project_registration WHERE project_id = %s",
+                (project_id,)
+            )
+            db.commit()
+
+            log_audit(
+                object_name="project_registration",
+                object_id=project_id,
+                property_name="PROJECT_DELETED",
+                old_value=project["project_name"],
+                new_value=None,
+                modified_by=deleted_by,
+                action_type="DELETE",
+            )
+
+            return True
+
+        except Exception:
+            db.rollback()
+            raise
+
+        finally:
+            db.close()
+
 
 project_service = ProjectService()
-
 
 
 

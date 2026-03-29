@@ -19,7 +19,22 @@ def list_bulk_upload_history(decoded):
 @bulk_upload_bp.route("/config/bulk-leads/upload", methods=["POST"])
 @token_required
 def upload_bulk_leads(decoded):
+    if decoded.get("role_type") not in ["ADMIN", "SALES_MGR"]:
+        return jsonify({"error": "Permission denied"}), 403
+
     upload_file = request.files.get("file")
+    if not upload_file:
+        return jsonify({"error": "No file provided"}), 400
+
+    # 5 MB max file size
+    MAX_FILE_SIZE = 5 * 1024 * 1024
+    upload_file.seek(0, 2)
+    file_size = upload_file.tell()
+    upload_file.seek(0)
+
+    if file_size > MAX_FILE_SIZE:
+        return jsonify({"error": "File too large. Maximum size is 5 MB."}), 413
+
     actor_id = decoded.get("sub") or decoded.get("username", "SYSTEM")
 
     try:

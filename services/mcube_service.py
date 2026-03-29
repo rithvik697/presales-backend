@@ -2,6 +2,14 @@ import os
 import logging
 import requests
 from db import get_db
+from services.leads_service import (
+    _generate_id,
+    _check_duplicate_phone,
+    _get_or_create_customer,
+    add_new_lead
+)
+from services.webhook_service import _find_source_by_name, _get_default_status
+from services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +78,108 @@ def _match_employee_by_phone(cursor, phone):
     return result["emp_id"] if result else None
 
 
+def _auto_create_lead_from_call(cursor, db, caller_phone, emp_id):
+    """
+    Auto-create a lead when an inbound call comes from an unknown number.
+    Returns the new lead_id or None if creation fails.
+    """
+    if not caller_phone:
+        return None
+
+    clean_phone = ''.join(filter(str.isdigit, caller_phone))[-10:]
+
+    # Check for duplicate (phone might exist but lead was inactive/deleted)
+    try:
+        _check_duplicate_phone(cursor, clean_phone)
+    except ValueError:
+        # Duplicate phone — don't create, just return None
+        logger.info(f"MCube auto-create skipped: duplicate phone {clean_phone}")
+        return None
+
+    # Find "IVR" or "MCube" source, or first available
+    source_id = _find_source_by_name(cursor, "IVR")
+    if not source_id:
+        source_id = _find_source_by_name(cursor, "MCube")
+    if not source_id:
+        cursor.execute("""
+            SELECT source_id FROM lead_sources
+            WHERE is_active = 1 ORDER BY source_id ASC LIMIT 1
+        """)
+        result = cursor.fetchone()
+        source_id = result["source_id"] if result else None
+
+    if not source_id:
+        logger.warning("MCube auto-create: no lead sources configured")
+        return None
+
+    # Get default status (New Enquiry — first in pipeline)
+    status_id = _get_default_status(cursor)
+    if not status_id:
+        logger.warning("MCube auto-create: no lead statuses configured")
+        return None
+
+    # Get a default project for the employee (first mapped project)
+    project_id = None
+    if emp_id:
+        cursor.execute("""
+            SELECT epm.project_id
+            FROM employee_project_mapping epm
+            WHERE epm.emp_id = %s AND epm.is_active = 1
+            LIMIT 1
+        """, (emp_id,))
+        result = cursor.fetchone()
+        project_id = result["project_id"] if result else None
+
+    if not project_id:
+        # Fall back to first active project
+        cursor.execute("""
+            SELECT project_id FROM project_registration
+            ORDER BY project_id ASC LIMIT 1
+        """)
+        result = cursor.fetchone()
+        project_id = result["project_id"] if result else None
+
+    if not project_id:
+        logger.warning("MCube auto-create: no projects configured")
+        return None
+
+    assigned_to = emp_id
+
+    # If no employee matched the agent phone, skip auto-creation
+    if not assigned_to:
+        logger.warning("MCube auto-create: no employee to assign, skipping lead creation")
+        return None
+
+    lead_data = {
+        "name": f"IVR Lead ({clean_phone})",
+        "phone": clean_phone,
+        "email": None,
+        "source": source_id,
+        "status": status_id,
+        "assigned_to": assigned_to,
+        "project": project_id,
+        "description": "Auto-created from inbound IVR call"
+    }
+
+    lead_id = add_new_lead(lead_data, actor_id=assigned_to, role="ADMIN")
+    db.commit()
+
+    # Notify the assigned employee
+    if assigned_to:
+        try:
+            create_notification(
+                assigned_to,
+                f"New IVR lead assigned: {clean_phone}",
+                "lead",
+                lead_id
+            )
+        except Exception as e:
+            logger.warning(f"MCube auto-create: notification failed: {e}")
+
+    logger.info(f"MCube auto-created lead: {lead_id}, phone={clean_phone}, assigned_to={assigned_to}")
+    return lead_id
+
+
 def process_mcube_call(data):
     """
     Process an incoming MCube webhook call record.
@@ -104,11 +214,19 @@ def process_mcube_call(data):
         lead_id = _match_lead_by_phone(cursor, caller_phone)
         emp_id = _match_employee_by_phone(cursor, agent_phone)
 
-        if not lead_id:
-            logger.warning(f"MCube webhook: no lead found for phone {caller_phone}")
-
         if not emp_id:
             logger.warning(f"MCube webhook: no employee found for phone {agent_phone}")
+
+        # Auto-create lead for inbound calls from unknown numbers
+        auto_created = False
+        if not lead_id:
+            is_inbound = call_type and call_type.lower() in ["inbound", "incoming"]
+            if is_inbound:
+                lead_id = _auto_create_lead_from_call(cursor, db, caller_phone, emp_id)
+                if lead_id:
+                    auto_created = True
+            else:
+                logger.warning(f"MCube webhook: no lead found for phone {caller_phone}")
 
         # Determine call source label
         source_label = "MCube"
@@ -136,6 +254,7 @@ def process_mcube_call(data):
         logger.info(
             f"MCube call logged: call_id={call_id}, lead={lead_id}, "
             f"emp={emp_id}, status={crm_status}, duration={duration}s"
+            f"{', auto_created=True' if auto_created else ''}"
         )
 
         return {
@@ -143,7 +262,8 @@ def process_mcube_call(data):
             "lead_id": lead_id,
             "emp_id": emp_id,
             "status": crm_status,
-            "matched": bool(lead_id)
+            "matched": bool(lead_id),
+            "auto_created": auto_created
         }
 
     except Exception as e:

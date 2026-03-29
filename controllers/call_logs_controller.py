@@ -14,16 +14,17 @@ call_logs_bp = Blueprint("call_logs", __name__)
 
 
 @call_logs_bp.route("/start", methods=["POST"])
-def start_call():
+@token_required
+def start_call(decoded):
     data = request.get_json()
     if not data:
         return jsonify({"error": "Invalid JSON body"}), 400
 
     lead_id = data.get("lead_id")
-    emp_id = data.get("emp_id")
+    emp_id = decoded["sub"]
 
-    if not lead_id or not emp_id:
-        return jsonify({"error": "lead_id and emp_id are required"}), 400
+    if not lead_id:
+        return jsonify({"error": "lead_id is required"}), 400
 
     call_id = start_call_service(lead_id, emp_id)
 
@@ -34,7 +35,8 @@ def start_call():
 
 
 @call_logs_bp.route("/end", methods=["POST"])
-def end_call():
+@token_required
+def end_call(decoded):
     data = request.get_json()
     if not data:
         return jsonify({"error": "Invalid JSON body"}), 400
@@ -59,19 +61,22 @@ def end_call():
 
 
 @call_logs_bp.route("/logs", methods=["GET"])
-def get_call_logs():
+@token_required
+def get_call_logs(decoded):
     logs = get_call_logs_service()
     return jsonify(logs), 200
 
 @call_logs_bp.route("/ui", methods=["GET"])
-def get_call_logs_ui():
+@token_required
+def get_call_logs_ui(decoded):
     from services.call_logs_service import get_call_logs_for_ui
     logs = get_call_logs_for_ui()
     return jsonify(logs), 200
 
 
 @call_logs_bp.route("/ui/lead/<lead_id>", methods=["GET"])
-def get_call_logs_for_lead(lead_id):
+@token_required
+def get_call_logs_for_lead(decoded, lead_id):
     logs = get_call_logs_for_lead_ui(lead_id)
     return jsonify(logs), 200
 

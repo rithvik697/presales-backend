@@ -73,10 +73,10 @@ def change_password(decoded):
 
     user_id = decoded["sub"]
 
-    result = auth_service.change_password(user_id, old_password, new_password)
+    success, err = auth_service.change_password(user_id, old_password, new_password)
 
-    if not result:
-        return jsonify({"message": "Old password incorrect"}), 400
+    if not success:
+        return jsonify({"message": err}), 400
 
     return jsonify({"message": "Password updated successfully"}), 200
 @auth_controller_bp.route("/forgot-password", methods=["POST"])

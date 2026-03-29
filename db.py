@@ -9,11 +9,10 @@ load_dotenv()
 # Database configuration from environment
 # ----------------------------------------
 DB_CONFIG = {
-    "host": "localhost",
-    "port" : 3306,
-    "user": "root",
-    "password": "Root@1234",
-    "database": "presales_crm_3"
+    "host": os.getenv("DB_HOST", "localhost"),
+    "user": os.getenv("DB_USER", "root"),
+    "password": os.getenv("DB_PASSWORD"),
+    "database": os.getenv("DB_NAME", "presales_crm")
 }
 
 # ----------------------------------------
@@ -21,7 +20,7 @@ DB_CONFIG = {
 # ----------------------------------------
 connection_pool = pooling.MySQLConnectionPool(
     pool_name="presales_pool",
-    pool_size=5,
+    pool_size=int(os.getenv("DB_POOL_SIZE", "20")),
     **DB_CONFIG
 )
 

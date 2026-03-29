@@ -1,9 +1,17 @@
+from datetime import datetime
 from flask import Blueprint, request, jsonify
 from services import leads_service
 from utils.token_helper import get_emp_id_from_token,get_emp_role_from_token
 from utils.validators import validate_lead_input
 
 leads_bp = Blueprint('leads', __name__)
+
+
+def _serialize_datetime(value):
+    """Return DB datetimes as plain local strings so frontend does not re-shift them."""
+    if isinstance(value, datetime):
+        return value.strftime('%Y-%m-%d %H:%M:%S')
+    return value
 
 
 def to_frontend_format(backend_lead):
@@ -35,13 +43,13 @@ def to_frontend_format(backend_lead):
         'projectId':      backend_lead.get('projectId'),
 
         'description':    backend_lead.get('description') or '',
-        'firstContacted': backend_lead.get('firstContacted'),
+        'firstContacted': _serialize_datetime(backend_lead.get('firstContacted')),
         'originallyCreatedBy': backend_lead.get('originallyCreatedBy') or backend_lead.get('createdBy'),
         'firstAssignedTo': backend_lead.get('firstAssignedTo') or backend_lead.get('assignedTo'),
         'currentAssignedTo': backend_lead.get('currentAssignedTo') or backend_lead.get('assignedTo'),
-        'createdAt':      backend_lead.get('createdAt'),
+        'createdAt':      _serialize_datetime(backend_lead.get('createdAt')),
         'createdBy':      backend_lead.get('createdBy'),
-        'modifiedAt':     backend_lead.get('modifiedAt'),
+        'modifiedAt':     _serialize_datetime(backend_lead.get('modifiedAt')),
         'modifiedBy':     backend_lead.get('modifiedBy'),
     }
 
