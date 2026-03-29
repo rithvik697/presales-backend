@@ -1,3 +1,4 @@
+from datetime import datetime
 from flask import Blueprint, request, jsonify
 from services import leads_service
 from utils.token_helper import get_emp_id_from_token,get_emp_role_from_token
@@ -7,9 +8,13 @@ leads_bp = Blueprint('leads', __name__)
 
 
 def _serialize_datetime(value):
+    """Return DB datetimes as plain local strings so frontend does not re-shift them."""
+    if isinstance(value, datetime):
+        return value.strftime('%Y-%m-%d %H:%M:%S')
     if hasattr(value, 'strftime'):
         return value.strftime('%Y-%m-%d %H:%M:%S')
     return value
+
 
 
 def to_frontend_format(backend_lead):

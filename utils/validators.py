@@ -18,9 +18,19 @@ def validate_phone(phone):
 
 
 def validate_password_strength(password):
-    """Validate password meets minimum requirements."""
-    if not password or len(password) < 6:
-        return False, "Password must be at least 6 characters"
+    """Validate password meets strength requirements."""
+    if not password or len(password) < 8:
+        return False, "Password must be at least 8 characters"
+    if len(password) > 64:
+        return False, "Password must not exceed 64 characters"
+    if not re.search(r'[A-Z]', password):
+        return False, "Password must contain at least one uppercase letter"
+    if not re.search(r'[a-z]', password):
+        return False, "Password must contain at least one lowercase letter"
+    if not re.search(r'[0-9]', password):
+        return False, "Password must contain at least one number"
+    if not re.search(r'[@$!%*?&#^()_\-+=]', password):
+        return False, "Password must contain at least one special character (@$!%*?&#^()_-+=)"
     return True, None
 
 

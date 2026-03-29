@@ -1,5 +1,5 @@
 import os
-from flask import Flask
+from flask import Flask, Response
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -22,10 +22,21 @@ from controllers.mcube_controller import mcube_bp
 from controllers.webhook_controller import webhook_bp
 from controllers.bulk_upload_controller import bulk_upload_bp
 from controllers.website_leads_controller import website_leads_bp
+from controllers.report_email_controller import report_email_bp
 
 app = Flask(__name__)
 allowed_origins = os.getenv("CORS_ORIGINS", "http://localhost:4200").split(",")
 CORS(app, origins=allowed_origins, supports_credentials=True)
+
+# Security headers on every response
+@app.after_request
+def set_security_headers(response: Response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 # Initialize Scheduler
 init_scheduler(app)
@@ -47,9 +58,11 @@ app.register_blueprint(mcube_bp, url_prefix="/api/calls")
 app.register_blueprint(webhook_bp, url_prefix="/api/webhook")
 app.register_blueprint(website_leads_bp, url_prefix="/api/website")
 app.register_blueprint(bulk_upload_bp, url_prefix="/api")
+app.register_blueprint(report_email_bp, url_prefix="/api")
 
 
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    is_debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+    app.run(host="0.0.0.0", port=5000, debug=is_debug)

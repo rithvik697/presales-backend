@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify
 from services.audit_service import get_audit_logs
+from decorators.auth_decorators import token_required
 
 # Create Blueprint
 audit_controller_bp = Blueprint(
@@ -11,7 +12,10 @@ audit_controller_bp = Blueprint(
 # GET AUDIT TRAIL
 # -------------------------
 @audit_controller_bp.route("/audit-trail", methods=["GET"])
-def fetch_audit_logs():
+@token_required
+def fetch_audit_logs(decoded):
+    if decoded.get("role_type") != "ADMIN":
+        return jsonify({"success": False, "error": "Admin access required"}), 403
 
     try:
         logs = get_audit_logs()

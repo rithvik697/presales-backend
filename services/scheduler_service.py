@@ -9,6 +9,7 @@ from services.reports_service import (
     get_daily_calls_and_fresh_leads
 )
 from services.email_service import send_html_email
+from services.report_email_service import get_recipients_for_report
 from services.notification_service import create_notification
 from datetime import datetime, timedelta
 import traceback
@@ -50,6 +51,12 @@ def get_admin_emails():
             conn.close()
 
 
+def get_report_emails(report_type):
+    """Get emails for a report type from config table, fallback to admin emails."""
+    emails = get_recipients_for_report(report_type)
+    if not emails:
+        emails = get_admin_emails()
+    return emails
 def get_admin_and_manager_emails():
     """Returns emails for both Admins and Sales Managers."""
     try:

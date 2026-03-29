@@ -73,16 +73,16 @@ def change_password(decoded):
 
     user_id = decoded["sub"]
 
-    result = auth_service.change_password(user_id, old_password, new_password)
+    success, err = auth_service.change_password(user_id, old_password, new_password)
 
-    if not result:
-        return jsonify({"message": "Old password incorrect"}), 400
+    if not success:
+        return jsonify({"message": err}), 400
 
     return jsonify({"message": "Password updated successfully"}), 200
 @auth_controller_bp.route("/forgot-password", methods=["POST"])
 def forgot_password():
 
-    data = request.json
+    data = request.json or {}
     email = data.get("email")
 
     if not email:
@@ -93,13 +93,16 @@ def forgot_password():
 
     try:
         auth_service.forgot_password(email)
+        return jsonify({
+            "success": True,
+            "message": "Reset email has been sent."
+        }), 200
     except Exception as e:
         logger.warning(f"Forgot password failed for {email}: {e}")
-
-    return jsonify({
-        "success": True,
-        "message": "If an account exists with that email, a reset link has been sent."
-    }), 200
+        return jsonify({
+            "success": False,
+            "error": "Account does not exist."
+        }), 404
     
 @auth_controller_bp.route("/reset-password", methods=["POST"])
 def reset_password():

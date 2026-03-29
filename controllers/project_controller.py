@@ -42,7 +42,8 @@ def create_project(decoded):
 # Get All Projects
 # -----------------------------
 @project_bp.route('/projects', methods=['GET'])
-def get_all_projects():
+@token_required
+def get_all_projects(decoded):
     try:
         projects = project_service.get_all_projects()
         return jsonify(projects), 200
@@ -56,7 +57,8 @@ def get_all_projects():
 # Get Project by ID
 # -----------------------------
 @project_bp.route('/projects/<project_id>', methods=['GET'])
-def get_project_by_id(project_id):
+@token_required
+def get_project_by_id(decoded, project_id):
     try:
         project = project_service.get_project_by_id(project_id)
 
@@ -136,6 +138,29 @@ def get_project_type_options():
             }
             for t in types
         ]), 200
+
+    except Exception:
+        traceback.print_exc()
+        return jsonify({"error": "Internal Server Error"}), 500
+
+
+# -----------------------------
+# Delete Project
+# -----------------------------
+@project_bp.route('/projects/<project_id>', methods=['DELETE'])
+@token_required
+def delete_project(decoded, project_id):
+    try:
+        if decoded.get("role_type") != "ADMIN":
+            return jsonify({"error": "Only admins can delete projects"}), 403
+
+        deleted_by = decoded.get("sub") or decoded.get("username", "SYSTEM")
+        deleted = project_service.delete_project(project_id, deleted_by)
+
+        if not deleted:
+            return jsonify({"error": "Project not found"}), 404
+
+        return jsonify({"message": "Project deleted successfully"}), 200
 
     except Exception:
         traceback.print_exc()
