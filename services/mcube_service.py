@@ -10,6 +10,7 @@ from services.leads_service import (
 )
 from services.webhook_service import _find_source_by_name, _get_default_status
 from services.notification_service import create_notification
+from services.re_enquiry_service import notify_admin_owned_reenquiry
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +214,7 @@ def process_mcube_call(data):
     try:
         lead_id = _match_lead_by_phone(cursor, caller_phone)
         emp_id = _match_employee_by_phone(cursor, agent_phone)
+        admin_owned_reenquiry = False
 
         if not emp_id:
             logger.warning(f"MCube webhook: no employee found for phone {agent_phone}")
@@ -227,6 +229,10 @@ def process_mcube_call(data):
                     auto_created = True
             else:
                 logger.warning(f"MCube webhook: no lead found for phone {caller_phone}")
+        elif call_type and call_type.lower() in ["inbound", "incoming"]:
+            admin_owned_reenquiry = bool(
+                notify_admin_owned_reenquiry(cursor, caller_phone, "MCube Call", emp_id)
+            )
 
         # Determine call source label
         source_label = "MCube"
@@ -263,7 +269,8 @@ def process_mcube_call(data):
             "emp_id": emp_id,
             "status": crm_status,
             "matched": bool(lead_id),
-            "auto_created": auto_created
+            "auto_created": auto_created,
+            "admin_owned_reenquiry": admin_owned_reenquiry
         }
 
     except Exception as e:

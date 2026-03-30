@@ -43,7 +43,9 @@ def receive_website_lead():
             return jsonify({
                 "success": True,
                 "status": "duplicate",
-                "message": result["message"]
+                "message": result["message"],
+                "admin_owned_reenquiry": result.get("admin_owned_reenquiry", False),
+                "admin_owned_lead_id": result.get("admin_owned_lead_id")
             }), 200
 
         return jsonify({

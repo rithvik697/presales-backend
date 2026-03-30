@@ -7,6 +7,7 @@ from services.leads_service import (
     add_new_lead
 )
 from services.notification_service import create_notification
+from services.re_enquiry_service import notify_admin_owned_reenquiry
 
 logger = logging.getLogger(__name__)
 
@@ -183,10 +184,18 @@ def process_webhook_lead(data):
         try:
             _check_duplicate_phone(cursor, phone)
         except ValueError as e:
+            admin_reenquiry = notify_admin_owned_reenquiry(
+                cursor,
+                phone,
+                source_name or "Webhook",
+                None
+            )
             logger.info(f"Webhook duplicate lead: {e}")
             return {
                 "status": "duplicate",
-                "message": str(e)
+                "message": str(e),
+                "admin_owned_reenquiry": bool(admin_reenquiry),
+                "admin_owned_lead_id": admin_reenquiry["lead_id"] if admin_reenquiry else None
             }
 
         # Match source

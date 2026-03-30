@@ -51,7 +51,25 @@ def _validate_sales_exec(cursor, emp_id, require_active):
     if not employee:
         raise ValueError("Employee not found")
     if employee["role_id"] != "SALES_EXEC":
-        raise ValueError("Only sales executives can be used in lead transfer")
+        raise ValueError("Leads can only be transferred from a sales executive")
+    if require_active and employee["emp_status"] != "Active":
+        raise ValueError("Target employee must be active")
+
+    return employee
+
+
+def _validate_transfer_target(cursor, emp_id, require_active):
+    cursor.execute("""
+        SELECT emp_id, role_id, emp_status
+        FROM employee
+        WHERE emp_id = %s
+    """, (emp_id,))
+    employee = cursor.fetchone()
+
+    if not employee:
+        raise ValueError("Target employee not found")
+    if employee["role_id"] not in {"SALES_EXEC", "ADMIN"}:
+        raise ValueError("Leads can only be transferred to an active sales executive or admin")
     if require_active and employee["emp_status"] != "Active":
         raise ValueError("Target employee must be active")
 
@@ -153,7 +171,7 @@ def transfer_leads(
         _ensure_transfer_log_table(cursor)
 
         _validate_sales_exec(cursor, from_emp_id, require_active=False)
-        _validate_sales_exec(cursor, to_emp_id, require_active=True)
+        _validate_transfer_target(cursor, to_emp_id, require_active=True)
 
         if from_emp_id == to_emp_id:
             raise ValueError("From employee and to employee cannot be the same")
@@ -256,13 +274,14 @@ def transfer_leads(
         transfer_id = cursor.lastrowid
         conn.commit()
 
-        create_notification(
-            to_emp_id,
-            "Lead Transfer",
-            f"{len(lead_ids)} lead(s) have been transferred to you",
-            "Leads",
-            lead_ids[0]
-        )
+        if to_emp_id != actor_id:
+            create_notification(
+                to_emp_id,
+                "Lead Transfer",
+                f"{len(lead_ids)} lead(s) have been transferred to you",
+                "Leads",
+                lead_ids[0]
+            )
 
         return {
             "transfer_id": transfer_id,
