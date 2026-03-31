@@ -5,7 +5,8 @@ from services.user_service import (
     get_user_by_id,
     update_user,
     update_user_status,
-    delete_user_by_id
+    delete_user_by_id,
+    resign_user
 )
 from decorators.auth_decorators import token_required
 from utils.validators import validate_user_input
@@ -246,6 +247,44 @@ def delete_user(decoded, emp_id):
             "success": True,
             "message": "User deleted successfully"
         }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@user_controller_bp.route('/users/<emp_id>/resign', methods=['PUT'])
+@token_required
+def resign_user_controller(decoded, emp_id):
+    if decoded.get("role_type") != "ADMIN":
+        return jsonify({"success": False, "error": "Admin access required"}), 403
+
+    try:
+        current_user = decoded.get('username', 'ADMIN')
+
+        resigned = resign_user(
+            emp_id,
+            modified_by=current_user
+        )
+
+        if not resigned:
+            return jsonify({
+                "success": False,
+                "error": "User not found"
+            }), 404
+
+        return jsonify({
+            "success": True,
+            "message": "User resigned successfully"
+        }), 200
+
+    except ValueError as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400
 
     except Exception as e:
         return jsonify({

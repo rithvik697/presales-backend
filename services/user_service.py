@@ -23,6 +23,26 @@ def _validate_fields(data, required_fields):
         raise ValueError(f"Missing required fields: {', '.join(missing)}")
 
 
+def _ensure_resigned_status_supported(cursor):
+    cursor.execute("""
+        SHOW COLUMNS FROM employee LIKE 'emp_status'
+    """)
+    column = cursor.fetchone()
+
+    if not column:
+        raise Exception("employee.emp_status column not found")
+
+    column_type = column[1] if isinstance(column, tuple) else column.get('Type', '')
+
+    if "Resigned" in str(column_type):
+        return
+
+    cursor.execute("""
+        ALTER TABLE employee
+        MODIFY COLUMN emp_status ENUM('Active', 'Inactive', 'Resigned') NULL
+    """)
+
+
 # -------------------------
 # GENERATE NEXT EMPLOYEE ID (RACE-CONDITION SAFE)
 # -------------------------
@@ -491,6 +511,100 @@ def delete_user_by_id(emp_id, modified_by='ADMIN'):
         if conn:
             conn.rollback()
         raise Exception(f"Failed to delete user {emp_id}: {str(e)}")
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+# -------------------------
+# RESIGN USER
+# -------------------------
+def resign_user(emp_id, modified_by='ADMIN'):
+    conn = None
+    cursor = None
+
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("""
+            SELECT emp_status
+            FROM employee
+            WHERE emp_id = %s
+        """, (emp_id,))
+        user = cursor.fetchone()
+
+        if not user:
+            raise Exception(f"User {emp_id} not found")
+
+        old_status = user['emp_status']
+
+        if old_status == 'Resigned':
+            raise ValueError("User has already resigned")
+
+        cursor.execute("""
+            SELECT COUNT(*) AS lead_count
+            FROM leads
+            WHERE emp_id = %s
+              AND is_active = 1
+        """, (emp_id,))
+        lead_record = cursor.fetchone() or {}
+        lead_count = lead_record.get('lead_count', 0)
+
+        if lead_count > 0:
+            raise ValueError(
+                "User cannot resign until all assigned leads are transferred"
+            )
+
+        cursor.close()
+        cursor = conn.cursor()
+
+        _ensure_resigned_status_supported(cursor)
+
+        cursor.execute("""
+            UPDATE employee
+            SET
+                emp_status = 'Resigned',
+                modified_by = %s,
+                modified_on = %s
+            WHERE emp_id = %s
+        """, (
+            modified_by,
+            datetime.now(),
+            emp_id
+        ))
+        conn.commit()
+
+        updated = cursor.rowcount > 0
+
+        if updated:
+            try:
+                log_audit(
+                    object_name="employee",
+                    object_id=emp_id,
+                    property_name="emp_status",
+                    old_value=old_status,
+                    new_value="Resigned",
+                    modified_by=modified_by,
+                    action_type="UPDATE"
+                )
+            except Exception as e:
+                print(f"Audit log failed: {e}")
+
+        return updated
+
+    except ValueError:
+        if conn:
+            conn.rollback()
+        raise
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Failed to resign user {emp_id}: {str(e)}")
 
     finally:
         if cursor:
