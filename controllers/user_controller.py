@@ -73,6 +73,8 @@ def create_user(decoded):
 @user_controller_bp.route('/users', methods=['GET'])
 @token_required
 def fetch_users(decoded):
+    if decoded.get("role_type") not in ["ADMIN", "SALES_MGR"]:
+        return jsonify({"success": False, "error": "Admin or Sales Manager access required"}), 403
 
     try:
         users = get_all_users()
@@ -95,6 +97,8 @@ def fetch_users(decoded):
 @user_controller_bp.route('/users/<emp_id>', methods=['GET'])
 @token_required
 def fetch_user_by_id_controller(decoded, emp_id):
+    if decoded.get("role_type") not in ["ADMIN", "SALES_MGR"]:
+        return jsonify({"success": False, "error": "Admin or Sales Manager access required"}), 403
 
     try:
         user = get_user_by_id(emp_id)
@@ -253,8 +257,6 @@ def delete_user(decoded, emp_id):
             "success": False,
             "error": str(e)
         }), 500
-
-
 @user_controller_bp.route('/users/<emp_id>/resign', methods=['PUT'])
 @token_required
 def resign_user_controller(decoded, emp_id):

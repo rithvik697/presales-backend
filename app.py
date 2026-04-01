@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+is_debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+
 # Import Blueprints
 from controllers.project_controller import project_bp
 from controllers.call_logs_controller import call_logs_bp
@@ -38,8 +40,9 @@ def set_security_headers(response: Response):
     response.headers["Cache-Control"] = "no-store"
     return response
 
-# Initialize Scheduler
-init_scheduler(app)
+# Initialize scheduler only once in debug/reloader mode.
+if not is_debug or os.getenv("WERKZEUG_RUN_MAIN") == "true":
+    init_scheduler(app)
 
 
 # Register Blueprints
@@ -64,5 +67,4 @@ app.register_blueprint(report_email_bp, url_prefix="/api")
 
 
 if __name__ == "__main__":
-    is_debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
     app.run(host="0.0.0.0", port=5000, debug=is_debug)
